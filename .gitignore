@@ -1,0 +1,9 @@
+# Proteger datos sensibles
+counters.json
+
+# Archivos temporales de Office/LibreOffice
+.~lock.*
+*.tmp
+
+# Si no quieres subir los precios a GitHub
+listado_precios_clientes.ods
