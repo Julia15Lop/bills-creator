@@ -1,5 +1,5 @@
-Emisor: arturo
+Emisor: Arturo
 Cliente: belinda
 Fecha: 28/04/2026
 Objetivo: 2500
-Prendas: {"MONO MARR\u00d3N CON MANGAS DE CUADROS": {"T-38": 1, "T-40": 2, "T-44": 4}, "MONO PANA AZUL MARINO": {"T-34": 20}, "MONO NEGRO FLUOR": {"T-34": 1, "T-36": 3}}
+Prendas: {"MONO VERDE MILITAR": {"T-38": 5}, "PANTAL\u00d3N VERDE CAZA": {"T-36": 3, "T-40": 10}}
