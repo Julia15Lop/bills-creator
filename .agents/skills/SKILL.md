@@ -1,33 +1,30 @@
-# Skill: Smart Textile Invoicing
+# Skill: Facturación ODS 
 
 ## Description
-Gestiona la facturación automatizada para mis clientes. Cruza datos de producción (prendas/tallas) con el maestro de precios y el contador de facturas para generar documentos profesionales en formato ODS y PDF.
+Sistema de facturación local que calcula precios, valida presupuestos objetivo y genera archivos .ods basados en plantillas de cliente, actualizando automáticamente los contadores de factura.
 
-## Prompt / Role
-"Eres un gestor administrativo especializado en el sector textil. Tu misión es recibir partes de producción, buscar los precios correspondientes en el maestro ODS y proponer un borrador de factura que se ajuste al presupuesto objetivo del usuario. Antes de generar cualquier archivo, debes mostrar el total con IVA y esperar confirmación explícita del usuario."
+## System Instructions / Rules
+1. **FLUJO CRÍTICO**: 1º Escribir `input.txt` -> 2º Ejecutar `python mcp_facturacion.py` para validar nombres y precios de productos -> 3º Ejecutar `python completar_ods.py`.
+2. **VALIDACIÓN DE OBJETIVO**: Tras el cálculo, informa al usuario del total. Si supera el "Objetivo", pregunta si desea proceder antes de generar el .ods.
+3. **SELECCIÓN DE PLANTILLA**: El sistema usará automáticamente `plantilla_belinda.ods` o `plantilla_woven.ods` según el cliente.
+4. **CONTADORES**: El sistema lee y actualiza `counters.json` automáticamente.
 
-## Tools (MCP Functions)
+## Tools
 
-### 1. get_emisor_context
-**Description:** Extrae los datos fiscales (CIF, dirección, cuenta bancaria) y el número de la última factura del archivo `counters.json`.
-**Inputs:** - `emisor`: "arturo" | "carmen"
+### 1. ejecutar_calculo
+**Description**: Escribe datos en `input.txt` y calcula totales.
+**Instructions**:
+1. Escribe en `input.txt`:
+   Emisor: {{emisor}}
+   Cliente: {{cliente}}
+   Fecha: {{fecha}}
+   Objetivo: {{objetivo}}
+   Prendas: {{prendas_json}}
+2. Ejecuta: `python mcp_facturacion.py`
+3. Muestra al usuario la tabla con: Emisor, Cliente, Base, IVA y Total.
 
-### 2. fetch_pricing_logic
-**Description:** Consulta el archivo 'listado_precios_clientes.ods' para obtener los valores de venta (cliente) y confección (costurera) de las prendas solicitadas.
-**Inputs:**
-- `cliente`: "belinda" | "woven"
-- `prendas`: array de strings
-
-### 3. draft_budget_proposal
-**Description:** Realiza el cálculo matemático: (Cantidad * Precio) + 21% IVA. Verifica la desviación respecto al presupuesto objetivo.
-**Inputs:**
-- `items`: array de objetos (modelo, talla, cantidad)
-- `objetivo`: number (ej. 2500)
-
-### 4. final_invoice_execution
-**Description:** Tras la confirmación del usuario, incrementa el contador en `counters.json`, inserta los datos en la plantilla ODS correspondiente ('plantilla_belinda.ods' o 'plantilla_woven.ods') y genera el PDF final.
-**Inputs:**
-- `confirmacion`: boolean
-
-## Output Format
-Muestra una tabla con el desglose por modelos y tallas, indicando el Subtotal Base, la cuota de IVA (21%) y el Total Final. Debe incluir el número de factura que se asignará.
+### 2. generar_ods_final
+**Description**: Crea el archivo .ods físico una vez el cálculo es correcto.
+**Instructions**:
+1. Ejecuta: `python completar_ods.py`
+2. Entrega al usuario el nombre del archivo generado.

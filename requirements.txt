@@ -1,0 +1,6 @@
+pandas
+odfpy
+ezodf
+lxml
+streamlit
+openpyxl
