@@ -18,7 +18,8 @@ def procesar():
             
             emisor_data = contadores[emisor_id]
             nuevo_num = emisor_data['ultimo_numero'] + 1
-            fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+            fecha_match = re.search(r'Fecha:\s*(\d{2}/\d{2}/\d{4})', text)
+            fecha_hoy = fecha_match.group(1) if fecha_match else datetime.now().strftime("%d/%m/%Y")
             
             objetivo = float(re.findall(r'Objetivo:\s*(\d+)', text)[0])
             prendas_input = json.loads(re.search(r'\{.*\}', text, re.DOTALL).group(0))

@@ -1,0 +1,56 @@
+{
+  "factura": 209,
+  "cliente": "belinda",
+  "fecha": "28/04/2026",
+  "emisor": {
+    "ultimo_numero": 208,
+    "nombre_fiscal": "Arturo Castro Garc\u00eda",
+    "cif": "03922281-E",
+    "direccion": "Calle Isidro del R\u00edo, 23",
+    "codigo_postal": "45121, Las Navillas (Toledo)",
+    "telefono": "645 84 44 62",
+    "mail": "patronajearturo@outlook.com",
+    "cuenta": "CaixaBank",
+    "numero_cuenta": "ES87 2100 1208 1201 0023 3210"
+  },
+  "items": [
+    {
+      "desc": "MONO MARR\u00d3N CON MANGAS DE CUADROS",
+      "talla": "T-38",
+      "cant": 1,
+      "precio": 45.0
+    },
+    {
+      "desc": "MONO MARR\u00d3N CON MANGAS DE CUADROS",
+      "talla": "T-40",
+      "cant": 2,
+      "precio": 45.0
+    },
+    {
+      "desc": "MONO MARR\u00d3N CON MANGAS DE CUADROS",
+      "talla": "T-44",
+      "cant": 4,
+      "precio": 45.0
+    },
+    {
+      "desc": "MONO PANA AZUL MARINO",
+      "talla": "T-34",
+      "cant": 20,
+      "precio": NaN
+    },
+    {
+      "desc": "MONO NEGRO FLUOR",
+      "talla": "T-34",
+      "cant": 1,
+      "precio": 45.0
+    },
+    {
+      "desc": "MONO NEGRO FLUOR",
+      "talla": "T-36",
+      "cant": 3,
+      "precio": 45.0
+    }
+  ],
+  "total_estimado": NaN,
+  "supera_objetivo": false
+}
