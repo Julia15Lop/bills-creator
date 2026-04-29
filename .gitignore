@@ -11,3 +11,6 @@ error_log.txt
 
 # Evitamos subir pycache generado local
 __pycache__/
+
+# Generador de contraseñas
+hash_gen.py
