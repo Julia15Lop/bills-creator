@@ -4,6 +4,7 @@ counters.json
 # Archivos temporales de Office/LibreOffice
 .~lock.*
 *.tmp
+.devcontainer/
 
 # Si no quieres subir los precios a GitHub
 listado_precios_clientes.ods
@@ -14,3 +15,4 @@ __pycache__/
 
 # Generador de contraseñas
 hash_gen.py
+
