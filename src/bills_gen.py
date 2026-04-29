@@ -27,6 +27,7 @@ def generar_ods(res):
     # EL TRUCO PARA LA FECHA: 
     # Forzamos el valor como string puro y duro para que el ODS no lo formatee.
     celda_fecha = sheet['G5']
+    str(f"DEBUG: Fecha detectada como: **{res['fecha']}**")
     celda_fecha.set_value(str(res['fecha'])) 
 
     # --- ÍTEMS Y CÁLCULOS FORZADOS ---
