@@ -3,14 +3,27 @@ import pandas as pd
 import json
 import os
 from datetime import datetime
-import subprocess
+# Importamos nuestras funciones modulares
+from src.engine import procesar_factura
+from src.bills_gen import generar_ods
 
 st.set_page_config(page_title="FactuPro Arturo Castro", layout="wide")
 
 tallas_cols = ["T-34", "T-36", "T-38", "T-40", "T-42", "T-44"]
 
-# --- LÓGICA DE RESET MEJORADA ---
-# Usamos un contador para la 'key' del editor. Al sumar 1, el editor se limpia.
+# --- PERSISTENCIA DE DATOS (Counters) ---
+# En Railway, si usas archivos, intenta leer de data/
+PATH_COUNTERS = 'data/counters.json'
+PATH_PRECIOS = 'data/listado_precios_clientes.ods'
+
+if os.path.exists(PATH_COUNTERS):
+    with open(PATH_COUNTERS, 'r', encoding='utf-8') as f:
+        contadores = json.load(f)
+else:
+    st.error("No se encuentra data/counters.json")
+    st.stop()
+
+# --- LÓGICA DE RESET ---
 if 'reset_counter' not in st.session_state:
     st.session_state.reset_counter = 0
 
@@ -18,19 +31,19 @@ if 'df_pedido' not in st.session_state:
     st.session_state.df_pedido = pd.DataFrame(columns=["Nombre Prenda"] + tallas_cols)
 
 def reset_todo():
-    # Limpiamos el DataFrame
     st.session_state.df_pedido = pd.DataFrame(columns=["Nombre Prenda"] + tallas_cols)
-    # Cambiamos la clave del editor para forzar el dibujo de una tabla nueva
     st.session_state.reset_counter += 1
     st.rerun()
 
+# --- INTERFAZ ---
 tab1, tab2 = st.tabs(["📄 Nueva Factura", "🏷️ Gestionar Precios"])
 
 # ==========================================
 # PESTAÑA 1: FACTURACIÓN
 # ==========================================
 with tab1:
-    st.title("🚀 Generador de Facturas")
+    st.title("🚀 Generador de Facturas (Cloud Ready)")
+    
     with st.sidebar:
         st.header("⚙️ Configuración")
         emisor = st.selectbox("Emisor", ["Arturo", "Carmen"])
@@ -40,56 +53,70 @@ with tab1:
         fecha_str = fecha_selec.strftime('%d/%m/%Y')
         
         st.divider()
-        # Botón de reset que ahora sí funciona
-        st.button("🔄 Generar Nueva", on_click=reset_todo, use_container_width=True)
+        st.button("🔄 Generar Nueva (Reset)", on_click=reset_todo, use_container_width=True)
 
     st.subheader("📦 Detalle del Pedido")
     
-    # El secreto está en: key=f"editor_{st.session_state.reset_counter}"
     pedido_editado = st.data_editor(
         st.session_state.df_pedido,
         num_rows="dynamic",
         use_container_width=True,
-        key=f"editor_{st.session_state.reset_counter}", 
+        key=f"editor_v_{st.session_state.reset_counter}", 
         column_config={
-            "Nombre Prenda": st.column_config.TextColumn("Modelo", width="large"),
+            "Nombre Prenda": st.column_config.TextColumn("Modelo / Referencia", width="large"),
             **{t: st.column_config.NumberColumn(t, min_value=0, default=0) for t in tallas_cols}
         }
     )
 
-    if st.button("📊 Generar Factura Final", type="primary", use_container_width=True):
-        if os.path.exists("ultimo_resultado.json"): 
-            os.remove("ultimo_resultado.json")
-        
-        prendas_json = {}
-        # Usamos pedido_editado directamente
+    if st.button("📊 Generar y Descargar Factura", type="primary", use_container_width=True):
+        # 1. Limpieza de datos del editor
+        prendas_dict = {}
         for _, fila in pedido_editado.iterrows():
             nombre = fila["Nombre Prenda"]
             if pd.isna(nombre) or str(nombre).strip() == "": continue
             
-            tallas_dict = {t: int(fila[t]) for t in tallas_cols if pd.notna(fila[t]) and int(fila[t]) > 0}
-            if tallas_dict: 
-                prendas_json[str(nombre).strip().upper()] = tallas_dict
+            # Recoger tallas con valor > 0
+            t_dict = {t: int(fila[t]) for t in tallas_cols if pd.notna(fila[t]) and int(fila[t]) > 0}
+            if t_dict:
+                prendas_dict[str(nombre).strip().upper()] = t_dict
 
-        if not prendas_json:
-            st.error("⚠️ No hay datos válidos (escribe un modelo y cantidades).")
+        if not prendas_dict:
+            st.error("⚠️ La tabla de pedido está vacía.")
         else:
-            input_content = f"Emisor: {emisor}\nCliente: {cliente}\nFecha: {fecha_str}\nObjetivo: {objetivo}\nPrendas: {json.dumps(prendas_json)}"
-            with open("input.txt", "w", encoding="utf-8") as f: 
-                f.write(input_content)
+            with st.spinner("Procesando factura..."):
+                # Cargamos precios
+                df_p = pd.read_excel(PATH_PRECIOS, engine='odf')
+                
+                # Ejecutamos motor interno (engine.py)
+                resultado = procesar_factura(emisor, cliente, fecha_str, objetivo, prendas_dict, df_p, contadores)
+                
+                # Generamos archivo físico temporal (bills_gen.py)
+                archivo_ods = generar_ods(resultado)
+                
+                # ÉXITO Y DESCARGA
+                st.success(f"✅ Factura Nº {resultado['factura']} generada para {cliente.capitalize()}.")
+                
+                # Botón de descarga para el navegador (estilo SRE/Web)
+                with open(archivo_ods, "rb") as f:
+                    st.download_button(
+                        label="📩 PULSA AQUÍ PARA DESCARGAR FACTURA",
+                        data=f,
+                        file_name=archivo_ods,
+                        mime="application/vnd.oasis.opendocument.spreadsheet",
+                        use_container_width=True
+                    )
+                
+                # Actualizamos contador
+                contadores[emisor.lower()]['ultimo_numero'] = resultado['factura']
+                with open(PATH_COUNTERS, 'w', encoding='utf-8') as f:
+                    json.dump(contadores, f, indent=2)
 
-            with st.spinner("Procesando..."):
-                subprocess.run(["python", "mcp_facturacion.py"])
-                subprocess.run(["python", "completar_ods.py"])
-            
-            if os.path.exists("ultimo_resultado.json"):
-                with open("ultimo_resultado.json", "r", encoding="utf-8") as r:
-                    res = json.load(r)
-                st.success(f"✅ Factura Nº {res['factura']} generada.")
-                st.metric("Total (IVA incl.)", f"{res['total_estimado']} €")
+                # Métricas visuales
+                c1, c2 = st.columns(2)
+                c1.metric("Total Final (IVA inc.)", f"{resultado['total_estimado']} €")
+                if resultado['supera_objetivo']:
+                    st.warning(f"Supera el objetivo marcado de {objetivo}€")
                 st.balloons()
-            else:
-                st.error("Error en el motor de cálculo. Revisa si el nombre de la prenda existe en el listado.")
 
 # ==========================================
 # PESTAÑA 2: LISTADO CON FILTROS
@@ -97,43 +124,35 @@ with tab1:
 with tab2:
     st.title("🏷️ Gestión de Listado de Precios")
     
-    if os.path.exists('listado_precios_clientes.ods'):
-        df_p = pd.read_excel('listado_precios_clientes.ods', engine='odf')
+    if os.path.exists(PATH_PRECIOS):
+        df_full = pd.read_excel(PATH_PRECIOS, engine='odf')
         
-        st.subheader("🔍 Filtros de búsqueda")
+        # Filtros dinámicos
+        st.subheader("🔍 Filtros")
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            filtro_cliente = st.multiselect("Filtrar por Cliente", options=df_p["ID_CLIENTE"].unique())
+            f_cli = st.multiselect("Por Cliente", options=df_full["ID_CLIENTE"].unique())
         with col_f2:
-            filtro_prenda = st.text_input("Buscar Prenda por nombre")
+            f_nom = st.text_input("Buscar por nombre de prenda")
 
-        df_filtrado = df_p.copy()
-        if filtro_cliente:
-            df_filtrado = df_filtrado[df_filtrado["ID_CLIENTE"].isin(filtro_cliente)]
-        if filtro_prenda:
-            df_filtrado = df_filtrado[df_filtrado["NOMBRE ARTÍCULO"].str.contains(filtro_prenda, case=False, na=False)]
+        df_view = df_full.copy()
+        if f_cli:
+            df_view = df_view[df_view["ID_CLIENTE"].isin(f_cli)]
+        if f_nom:
+            df_view = df_view[df_view["NOMBRE ARTÍCULO"].str.contains(f_nom, case=False, na=False)]
 
-        st.info("💡 Edita y pulsa 'Guardar'. Para añadir prendas nuevas, quita los filtros primero.")
+        st.info("Edita la tabla inferior y pulsa Guardar.")
+        df_edit_p = st.data_editor(df_view, num_rows="dynamic", use_container_width=True, key="edit_precios")
         
-        df_editado_p = st.data_editor(
-            df_filtrado, 
-            num_rows="dynamic", 
-            use_container_width=True,
-            key="precios_editor_global"
-        )
-        
-        if st.button("💾 Guardar Cambios en el ODS"):
-            # Lógica para no perder datos al filtrar
-            if filtro_cliente or filtro_prenda:
-                df_p.update(df_editado_p)
-                nuevas = df_editado_p[~df_editado_p.index.isin(df_p.index)]
-                df_final = pd.concat([df_p, nuevas])
+        if st.button("💾 Guardar Cambios en Precios"):
+            # Lógica de merge para no perder datos ocultos por filtros
+            if f_cli or f_nom:
+                df_full.update(df_edit_p)
+                nuevos_registros = df_edit_p[~df_edit_p.index.isin(df_full.index)]
+                df_final = pd.concat([df_full, nuevos_registros])
             else:
-                df_final = df_editado_p
+                df_final = df_edit_p
 
-            try:
-                df_final.to_excel('listado_precios_clientes.ods', engine='odf', index=False)
-                st.success("¡Listado actualizado!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al guardar: {e}")
+            df_final.to_excel(PATH_PRECIOS, engine='odf', index=False)
+            st.success("¡Listado de precios actualizado!")
+            st.rerun()

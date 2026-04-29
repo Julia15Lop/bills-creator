@@ -1,9 +1,9 @@
 {
-  "factura": 213,
+  "factura": 214,
   "cliente": "belinda",
-  "fecha": "28/04/2026",
+  "fecha": "29/04/2026",
   "emisor": {
-    "ultimo_numero": 212,
+    "ultimo_numero": 213,
     "nombre_fiscal": "Arturo Castro Garc\u00eda",
     "cif": "03922281-E",
     "direccion": "Calle Isidro del R\u00edo, 23",
@@ -15,20 +15,68 @@
   },
   "items": [
     {
-      "desc": "PANTAL\u00d3N VERDE CAZA",
+      "desc": "CHALECO CUADROS VERDES",
       "talla": "T-34",
       "cant": 2,
-      "precio": 25.0
+      "precio": 26.0
     },
     {
-      "desc": "PANTAL\u00d3N VERDE CAZA",
+      "desc": "CHALECO CUADROS VERDES",
       "talla": "T-38",
+      "cant": 1,
+      "precio": 26.0
+    },
+    {
+      "desc": "CHALECO CUADROS VERDES",
+      "talla": "T-40",
+      "cant": 1,
+      "precio": 26.0
+    },
+    {
+      "desc": "CHALECO CUADROS VERDES",
+      "talla": "T-44",
+      "cant": 1,
+      "precio": 26.0
+    },
+    {
+      "desc": "MONO GRANATE JAPON\u00c9S",
+      "talla": "T-34",
+      "cant": 1,
+      "precio": 55.0
+    },
+    {
+      "desc": "MONO GRANATE JAPON\u00c9S",
+      "talla": "T-36",
       "cant": 2,
-      "precio": 25.0
+      "precio": 55.0
+    },
+    {
+      "desc": "MONO GRANATE JAPON\u00c9S",
+      "talla": "T-40",
+      "cant": 4,
+      "precio": 55.0
+    },
+    {
+      "desc": "MONO GRANATE JAPON\u00c9S",
+      "talla": "T-44",
+      "cant": 1,
+      "precio": 55.0
+    },
+    {
+      "desc": "MONO MARR\u00d3N CON MANGAS DE CUADROS",
+      "talla": "T-34",
+      "cant": 1,
+      "precio": 45.0
     },
     {
       "desc": "MONO MARR\u00d3N CON MANGAS DE CUADROS",
       "talla": "T-36",
+      "cant": 1,
+      "precio": 45.0
+    },
+    {
+      "desc": "MONO MARR\u00d3N CON MANGAS DE CUADROS",
+      "talla": "T-38",
       "cant": 2,
       "precio": 45.0
     },
@@ -37,8 +85,50 @@
       "talla": "T-40",
       "cant": 3,
       "precio": 45.0
+    },
+    {
+      "desc": "MONO MARR\u00d3N CON MANGAS DE CUADROS",
+      "talla": "T-42",
+      "cant": 1,
+      "precio": 45.0
+    },
+    {
+      "desc": "MONO MARR\u00d3N CON MANGAS DE CUADROS",
+      "talla": "T-44",
+      "cant": 1,
+      "precio": 45.0
+    },
+    {
+      "desc": "PANTAL\u00d3N VERDE CAZA",
+      "talla": "T-34",
+      "cant": 1,
+      "precio": 25.0
+    },
+    {
+      "desc": "PANTAL\u00d3N VERDE CAZA",
+      "talla": "T-36",
+      "cant": 1,
+      "precio": 25.0
+    },
+    {
+      "desc": "PANTAL\u00d3N VERDE CAZA",
+      "talla": "T-40",
+      "cant": 1,
+      "precio": 25.0
+    },
+    {
+      "desc": "PANTAL\u00d3N VERDE CAZA",
+      "talla": "T-42",
+      "cant": 1,
+      "precio": 25.0
+    },
+    {
+      "desc": "PANTAL\u00d3N VERDE CAZA",
+      "talla": "T-44",
+      "cant": 1,
+      "precio": 25.0
     }
   ],
-  "total_estimado": 393.25,
+  "total_estimado": 1331.0,
   "supera_objetivo": false
 }
