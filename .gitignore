@@ -8,8 +8,6 @@ counters.json
 # Si no quieres subir los precios a GitHub
 listado_precios_clientes.ods
 error_log.txt
-input.txt
-ultimo_resultado.json
 
 # Evitamos subir pycache generado local
 __pycache__/

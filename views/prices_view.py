@@ -3,46 +3,62 @@ import pandas as pd
 import os
 
 def render_prices_view():
-    st.subheader("🏷️ Gestión de Listado de Precios")
     PATH_PRECIOS = 'data/listado_precios_clientes.ods'
+    st.subheader("🏷️ Maestro de Precios")
 
     if not os.path.exists(PATH_PRECIOS):
-        st.error("No se encontró el archivo de precios en data/")
+        st.error("No se encuentra el archivo de precios.")
         return
 
-    # Cargar Excel Maestro
-    df_full = pd.read_excel(PATH_PRECIOS, engine='odf')
+    # 1. Carga de datos
+    df_precios = pd.read_excel(PATH_PRECIOS, engine='odf')
 
-    # Filtros de búsqueda
-    col1, col2 = st.columns(2)
-    with col1:
-        f_cli = st.multiselect("Filtrar por Cliente:", options=df_full["ID_CLIENTE"].unique() if "ID_CLIENTE" in df_full.columns else [])
-    with col2:
-        f_nom = st.text_input("Buscar prenda por nombre:")
+    # 2. Filtros Externos (Buscador general)
+    busqueda = st.text_input("🔍 Buscador rápido (Modelo o Referencia):", "")
+    
+    df_mostrar = df_precios.copy()
+    if busqueda:
+        df_mostrar = df_mostrar[df_mostrar['NOMBRE ARTÍCULO'].str.contains(busqueda, case=False, na=False)]
 
-    # Aplicar Filtros
-    df_view = df_full.copy()
-    if f_cli:
-        df_view = df_view[df_view["ID_CLIENTE"].isin(f_cli)]
-    if f_nom:
-        df_view = df_view[df_view["NOMBRE ARTÍCULO"].str.contains(f_nom, case=False, na=False)]
+    # 3. EL EDITOR CON FILTROS EN CABECERAS
+    st.info("💡 Haz clic en la lupa 🔍 de cualquier cabecera (Colección, Categoría, etc.) para filtrar la tabla.")
+    
+    # Configuramos las columnas para que sean interactivas
+    df_editado = st.data_editor(
+        df_mostrar, 
+        use_container_width=True, 
+        num_rows="dynamic",
+        key="editor_interactivo",
+        column_config={
+            "COLECCIÓN": st.column_config.SelectboxColumn("Colección", options=list(df_precios['COLECCIÓN'].unique()) if 'COLECCIÓN' in df_precios else []),
+            "CATEGORÍA": st.column_config.SelectboxColumn("Categoría", options=list(df_precios['CATEGORÍA'].unique()) if 'CATEGORÍA' in df_precios else []),
+            "PRECIO CLIENTE": st.column_config.NumberColumn("Precio (€)", format="%.2f €"),
+        }
+    )
 
-    # Editor de datos
-    st.info("💡 Puedes editar precios o añadir filas aquí debajo.")
-    df_edit = st.data_editor(df_view, num_rows="dynamic", use_container_width=True)
+    # 4. BOTONES DE ACCIÓN
+    st.divider()
+    c1, c2, c3 = st.columns(3)
 
-    # Guardar cambios
-    if st.button("💾 Guardar Cambios en Maestro"):
-        try:
-            # Sincronizar cambios con el dataframe original (por si había filtros)
-            if f_cli or f_nom:
-                df_full.update(df_edit)
-                nuevas_filas = df_edit[~df_edit.index.isin(df_full.index)]
-                df_final = pd.concat([df_full, nuevas_filas])
-            else:
-                df_final = df_edit
+    with c1:
+        if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
+            try:
+                # Sincronización robusta
+                df_precios.update(df_editado)
+                if len(df_editado) > len(df_mostrar):
+                    nuevas = df_editado.iloc[len(df_mostrar):]
+                    df_precios = pd.concat([df_precios, nuevas], ignore_index=True)
+                
+                df_precios.to_excel(PATH_PRECIOS, engine='odf', index=False)
+                st.success("✅ Guardado correctamente.")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
-            df_final.to_excel(PATH_PRECIOS, engine='odf', index=False)
-            st.success("¡Base de datos de precios actualizada correctamente!")
-        except Exception as e:
-            st.error(f"Error al guardar: {e}")
+    with c2:
+        csv = df_editado.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Exportar Excel", data=csv, file_name="precios_export.csv", use_container_width=True)
+
+    with c3:
+        html_table = df_editado.to_html(index=False, border=1)
+        html_final = f"<html><style>table{{width:100%;border-collapse:collapse;font-family:sans-serif;}}th,td{{padding:8px;border:1px solid #ccc;}}th{{background:#eee;}}</style><body>{html_table}</body></html>"
+        st.download_button("🖨️ Generar PDF", data=html_final, file_name="imprimir.html", mime="text/html", use_container_width=True)
