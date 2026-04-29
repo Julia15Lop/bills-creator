@@ -3,16 +3,21 @@
 Sistema profesional de generación de facturas ODS para talleres de confección. Ejecutado sobre Streamlit con arquitectura modular.
 
 ## 🛡️ Seguridad y Acceso
-* **Login Requerido:** Acceso protegido mediante `streamlit-authenticator`.
+* **Login Requerido:** Acceso protegido mediante `streamlit-authenticator`. El usuario `admin`posee visibilidad total. 
 * **Cifrado de Contraseñas:** Las credenciales se almacenan mediante hashes Bcrypt en `config.yaml`.
 * **Seguridad de Datos:** Información fiscal sensible centralizada en `data/counters.json`.
 
-## 📂 Estructura del Software (SRE Design)
-* `app.py`: Punto de entrada y orquestación de la UI.
-* `src/auth.py`: Gestión de sesiones y autenticación de usuarios.
-* `src/engine.py`: Motor de cálculo (mapeo de precios y aplicación de IVA).
-* `src/bills_gen.py`: Generador de archivos ODS forzando el cálculo de valores.
-* `src/utils.py`: Herramientas de limpieza de strings y formateo numérico.
+## 📁 Estructura del Proyecto
+- `app.py`: Punto de entrada y gestión de navegación.
+- `views/`: Contiene las pantallas de la aplicación (Bills y Prices).
+- `src/`: Lógica de negocio (Autenticación, Motor de Cálculo, Generador ODS).
+- `data/`: Persistencia en archivos (Contadores JSON y Precios ODS).
+- `output/`: Carpeta donde se depositan las facturas generadas.
+
+## 🛠️ Instalación
+1. `pip install -r requirements.txt`
+2. Configurar usuarios en `config.yaml`.
+3. Ejecutar: `streamlit run app.py`
 
 ## 🚀 Despliegue (Railway)
 1. Conectar este repositorio a Railway.app.

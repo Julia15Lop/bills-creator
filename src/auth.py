@@ -5,9 +5,9 @@ from yaml.loader import SafeLoader
 import os
 
 def check_auth():
-    # Cargar la configuración desde el YAML
+    # Cargar configuración
     config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
-    with open(config_path) as file:
+    with open(config_path, 'r', encoding='utf-8') as file:
         config = yaml.load(file, Loader=SafeLoader)
 
     authenticator = stauth.Authenticate(
@@ -17,16 +17,20 @@ def check_auth():
         config['cookie']['expiry_days']
     )
 
-    # Renderizar el formulario de login
-    name, authentication_status, username = authenticator.login('main')
+    # El nuevo método login devuelve el estado directamente
+    # La interfaz se dibuja sola
+    authenticator.login()
 
-    if authentication_status:
-        # Si el login es correcto, guardamos el objeto en la sesión para usarlo luego
-        st.session_state['authenticator'] = authenticator
-        return True, name, username
-    elif authentication_status == False:
-        st.error('Usuario o contraseña incorrectos')
-        return False, None, None
-    elif authentication_status == None:
-        st.warning('Por favor, introduce tus credenciales')
-        return False, None, None
+    # Recuperamos los valores desde el estado de la sesión que maneja la librería
+    auth_status = st.session_state.get("authentication_status")
+    username = st.session_state.get("username")
+    
+    # Buscamos el nombre completo en el config usando el username
+    name = None
+    if auth_status and username:
+        name = config['credentials']['usernames'][username]['name']
+
+    # Guardamos el autenticador para poder hacer logout luego
+    st.session_state['authenticator'] = authenticator
+
+    return auth_status, name, username
