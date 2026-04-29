@@ -1,0 +1,17 @@
+credentials:
+  usernames:
+    arturo:
+      email: "julialopezs15@hotmail.com"
+      name: "Arturo Castro"
+      password: "$2b$12$4qjbrLUa5CbaCScIUzwLSeD6yoZ4quAF92rxq77H0lQGrpBT7gzLi" # HASH generado con hash_gen.py
+    admin:
+      email: "julialopezs15@hotmail.com"
+      name: "Administrador"
+      password: "$2b$12$e0AXTZBOhW8BFATPUK4bheuWn/HH5WbZzKw1NNqx/OO6.Y3GjjvRu"
+cookie:
+  expiry_days: 30
+  key: "j15a22LsCG" # Clave inventada
+  name: "billpro_auth_cookie"
+preauthorized:
+  emails:
+    - "julialopezs15@hotmail.com"

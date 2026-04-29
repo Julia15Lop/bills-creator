@@ -1,5 +1,0 @@
-Emisor: Arturo
-Cliente: belinda
-Fecha: 28/04/2026
-Objetivo: 2500
-Prendas: {"PANTAL\u00d3N VERDE CAZA": {"T-34": 2, "T-38": 2}, "MONO MARR\u00d3N CON MANGAS DE CUADROS": {"T-36": 2, "T-40": 3}}

@@ -10,3 +10,6 @@ listado_precios_clientes.ods
 error_log.txt
 input.txt
 ultimo_resultado.json
+
+# Evitamos subir pycache generado local
+__pycache__/

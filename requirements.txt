@@ -4,3 +4,4 @@ ezodf
 lxml
 streamlit
 openpyxl
+streamlit-authenticator
