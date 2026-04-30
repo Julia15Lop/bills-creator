@@ -5,6 +5,7 @@ counters.json
 .~lock.*
 *.tmp
 .devcontainer/
+output/
 
 # Si no quieres subir los precios a GitHub
 listado_precios_clientes.ods
