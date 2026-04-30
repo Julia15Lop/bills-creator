@@ -5,3 +5,5 @@ lxml
 streamlit
 openpyxl
 streamlit-authenticator
+O365
+xlsxwriter
