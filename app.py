@@ -2,7 +2,7 @@ import streamlit as st
 from src.auth import check_auth
 
 # 1. Configuración de página
-st.set_page_config(page_title="PatternBills Arturo Castro", page_icon="🧵", layout="wide")
+st.set_page_config(page_title="PatternBills - Factur", page_icon="🧵", layout="wide")
 
 # 2. Seguridad
 auth_status, user_full_name, username = check_auth()
