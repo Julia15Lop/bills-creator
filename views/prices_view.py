@@ -3,15 +3,15 @@ import pandas as pd
 import os
 
 def render_prices_view():
-    PATH_PRECIOS = 'data/listado_precios_clientes.ods'
-    st.subheader("🏷️ Maestro de Precios")
+    PATH_PRECIOS = 'data/listado_precios_clientes.xlsx'
+    st.subheader("🏷️ Listado de Precios")
 
     if not os.path.exists(PATH_PRECIOS):
         st.error(f"🚨 No se encuentra el archivo: {PATH_PRECIOS}")
         st.info("Asegúrate de que la carpeta 'data' existe y tiene el archivo .ods")
         return
 
-    df_precios = pd.read_excel(PATH_PRECIOS, engine='odf')
+    df_precios = pd.read_excel(PATH_PRECIOS)
 
     # --- FILTROS SUPERIORES ---
     col_f1, col_f2 = st.columns(2)
