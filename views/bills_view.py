@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from src.engine import procesar_factura
 from src.bills_gen import generar_ods
+from src.utils import limpiar_precio
 
 def render_bills_view(username):
     PATH_COUNTERS = 'data/counters.json'
@@ -32,7 +33,26 @@ def render_bills_view(username):
         user_id = str(username).strip().lower()
         emisor_key = user_id if user_id != "admin" else st.selectbox("Emisor:", list(contadores.keys()))
         
-        cliente = st.selectbox("Cliente:", ["belinda", "woven"])
+        # Cargar clientes dinámicos desde el Excel si está disponible
+        clientes_disp = ["belinda", "woven"]
+        if os.path.exists(PATH_PRECIOS):
+            try:
+                df_p = pd.read_excel(PATH_PRECIOS)
+                if 'ID_CLIENTE' in df_p.columns:
+                    clientes_disp = sorted(df_p['ID_CLIENTE'].dropna().astype(str).str.strip().unique().tolist())
+            except:
+                pass
+        
+        cliente = st.selectbox("Cliente:", clientes_disp)
+        
+        # Si cambia el cliente, limpiamos el pedido actual
+        if "prev_cliente" not in st.session_state:
+            st.session_state.prev_cliente = cliente
+        elif st.session_state.prev_cliente != cliente:
+            st.session_state.prev_cliente = cliente
+            limpiar_campos()
+            st.rerun()
+            
         objetivo = st.number_input("Objetivo (€):", value=2500)
         
         fecha_sel = st.date_input("Fecha:", datetime.now())
@@ -42,6 +62,17 @@ def render_bills_view(username):
         if st.button("➕ Nueva Factura", use_container_width=True):
             limpiar_campos()
             st.rerun()
+
+    # Cargar prendas asociadas al cliente seleccionado para el autocompletado/sugerencia
+    lista_prendas = []
+    if os.path.exists(PATH_PRECIOS):
+        try:
+            df_p = pd.read_excel(PATH_PRECIOS)
+            COL_NOMBRE_EXCEL = 'NOMBRE ARTÍCULO'
+            df_client = df_p[df_p['ID_CLIENTE'].astype(str).str.strip().str.lower() == cliente.lower()]
+            lista_prendas = sorted(df_client[COL_NOMBRE_EXCEL].dropna().astype(str).str.strip().unique().tolist())
+        except Exception as e:
+            st.error(f"Error al cargar las prendas del cliente: {e}")
 
     # 3. Tabla de Pedido
     st.write(f"### 📋 Pedido: {emisor_key.upper()}")
@@ -57,6 +88,12 @@ def render_bills_view(username):
         use_container_width=True,
         key=f"ed_{emisor_key}_{suffix}", 
         column_config={
+            "Nombre Prenda": st.column_config.SelectboxColumn(
+                "Nombre Prenda",
+                options=lista_prendas,
+                required=True,
+                help="Selecciona o busca el nombre de la prenda en la lista de precios"
+            ),
             **{t: st.column_config.NumberColumn(t, min_value=0, default=0) for t in TALLAS_COLS}
         }
     )
@@ -93,7 +130,7 @@ def render_bills_view(username):
                 
                 if not match.empty:
                     # Usamos tu columna 'PRECIO CLIENTE'
-                    p_unitario = float(match.iloc[0][COL_PRECIO_EXCEL])
+                    p_unitario = limpiar_precio(match.iloc[0][COL_PRECIO_EXCEL])
                     total_acumulado += sum(cantidades.values()) * p_unitario
                 else:
                     prendas_sin_precio.append(nombre_clean)
@@ -108,10 +145,11 @@ def render_bills_view(username):
                 st.divider()
                 c1, c2 = st.columns([2, 1])
                 
+                total_con_iva = round(total_acumulado * 1.21, 2)
                 with c2:
-                    st.metric("PRECIO FINAL", f"{total_acumulado:,.2f} €")
-                    if total_acumulado > objetivo:
-                        st.warning(f"⚠️ ¡Ojo! Te has pasado del objetivo por {(total_acumulado - objetivo):.2f} €")
+                    st.metric("PRECIO FINAL (con IVA)", f"{total_con_iva:,.2f} €")
+                    if total_con_iva > objetivo:
+                        st.warning(f"⚠️ ¡Ojo! Te has pasado del objetivo por {(total_con_iva - objetivo):.2f} €")
 
                 # Generar Factura
                 datos_fiscales = contadores[emisor_key]
