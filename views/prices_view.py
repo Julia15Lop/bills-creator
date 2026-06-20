@@ -8,7 +8,7 @@ def render_prices_view():
 
     if not os.path.exists(PATH_PRECIOS):
         st.error(f"🚨 No se encuentra el archivo: {PATH_PRECIOS}")
-        st.info("Asegúrate de que la carpeta 'data' existe y tiene el archivo .ods")
+        st.info("Asegúrate de que la carpeta 'data' existe y tiene el archivo .xlsx")
         return
 
     df_precios = pd.read_excel(PATH_PRECIOS)
@@ -52,7 +52,7 @@ def render_prices_view():
                     nuevas = df_editado.iloc[len(df_mostrar):]
                     df_precios = pd.concat([df_precios, nuevas], ignore_index=True)
                 
-                df_precios.to_excel(PATH_PRECIOS, engine='odf', index=False)
+                df_precios.to_excel(PATH_PRECIOS, engine='openpyxl', index=False)
                 st.success("✅ Cambios guardados.")
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
