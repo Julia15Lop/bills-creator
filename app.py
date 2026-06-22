@@ -11,6 +11,7 @@ if auth_status:
     # Importación diferida para mejorar velocidad
     from views.bills_view import render_bills_view
     from views.prices_view import render_prices_view
+    from views.history_view import render_history_view
 
     # 3. Sidebar: Usuario y Logout
     with st.sidebar:
@@ -19,13 +20,16 @@ if auth_status:
         st.divider()
 
     # 4. Diseño de Pestañas (Tabs) - El que te gusta
-    tab_factura, tab_precios = st.tabs(["📄 Nueva Factura", "🏷️ Productos y Precios"])
+    tab_factura, tab_precios, tab_historial = st.tabs(["📄 Nueva Factura", "🏷️ Productos y Precios", "📊 Historial y Consultas"])
 
     with tab_factura:
         render_bills_view(username)
         
     with tab_precios:
         render_prices_view()
+
+    with tab_historial:
+        render_history_view()
 
 elif auth_status is False:
     st.error('Usuario o contraseña incorrectos')

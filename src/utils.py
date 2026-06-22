@@ -25,3 +25,27 @@ def limpiar_precio(valor):
 def limpiar_nombre_archivo(texto):
     """Evita caracteres raros en el nombre del archivo final."""
     return re.sub(r'[^\w\s-]', '', texto).strip().replace(' ', '_')
+
+def registrar_factura(n_factura, fecha, emisor, cliente, total_sin_iva, total_con_iva, ruta_archivo, path_registro='data/registro_facturas.xlsx'):
+    import os
+    nuevo_registro = {
+        "Nº Factura": [n_factura],
+        "Fecha": [fecha],
+        "Emisor": [emisor],
+        "Cliente": [cliente],
+        "Total sin IVA": [total_sin_iva],
+        "Total con IVA": [total_con_iva],
+        "Ruta Archivo": [ruta_archivo]
+    }
+    df_nuevo = pd.DataFrame(nuevo_registro)
+    
+    if os.path.exists(path_registro):
+        try:
+            df_existente = pd.read_excel(path_registro)
+            df_final = pd.concat([df_existente, df_nuevo], ignore_index=True)
+        except Exception:
+            df_final = df_nuevo
+    else:
+        df_final = df_nuevo
+        
+    df_final.to_excel(path_registro, engine='openpyxl', index=False)
