@@ -1,6 +1,14 @@
 # Proteger datos sensibles
 counters.json
 
+# Archivos Excel con datos de negocio (facturas, precios, clientes)
+data/*.xlsx
+data/*.ods
+
+# Archivos de copia de seguridad
+data/*copia*
+data/*backup*
+
 # Archivos temporales de Office/LibreOffice
 .~lock.*
 *.tmp
