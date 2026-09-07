@@ -76,8 +76,12 @@ def render_history_view():
                 st.markdown("📈 **Facturación Mensual (con IVA)**")
                 # Agrupar por mes y rellenar meses faltantes (1 al 12)
                 df_meses = df_año.groupby(df_año['Fecha_dt'].dt.month)['Total con IVA'].sum().reindex(range(1, 13), fill_value=0.0).reset_index()
-                df_meses['Mes'] = df_meses['Fecha_dt'].map(meses_es)
+                df_meses.columns = ['mes_num', 'Total con IVA']
+                # Prefijo numérico para garantizar orden cronológico (01-Ene, 02-Feb...)
+                df_meses['Mes'] = df_meses['mes_num'].apply(lambda n: f"{n:02d}-{meses_es.get(n, str(n))}")
+                df_meses = df_meses.sort_values('mes_num')
                 st.bar_chart(df_meses.set_index('Mes')['Total con IVA'], height=250)
+
                 
             with col_g2:
                 st.markdown("🎯 **Facturación por Cliente (con IVA)**")
@@ -140,8 +144,78 @@ def render_history_view():
 
     st.divider()
 
-    # --- TABLA DE REGISTROS EDITABLE ---
+    # --- 3. INFORME TRIMESTRAL PARA EL GESTOR ---
+    st.write("### 📝 Informe Trimestral (para el gestor)")
+    
+    # Añadir columna de trimestre
+    df_año_trim = df_año.copy()
+    df_año_trim['Trimestre'] = df_año_trim['Fecha_dt'].dt.quarter
+    
+    trimestres_disp = sorted(df_año_trim['Trimestre'].dropna().unique())
+    if not trimestres_disp:
+        st.info("No hay datos suficientes para el informe trimestral en este año.")
+    else:
+        trim_sel = st.selectbox("Seleccionar Trimestre:", [f"Trimestre {int(t)}" for t in trimestres_disp])
+        trim_num = int(trim_sel[-1])
+        
+        df_trim = df_año_trim[df_año_trim['Trimestre'] == trim_num]
+        ingresos_brutos = df_trim['Total sin IVA'].sum()
+        iva_repercutido = df_trim['Total con IVA'].sum() - ingresos_brutos
+        
+        st.write(f"**Resumen de Ventas (Ingresos) - {trim_sel} del {año_sel}**")
+        col_t1, col_t2 = st.columns(2)
+        col_t1.metric("Ingresos Brutos (Base Imponible)", f"{ingresos_brutos:,.2f} €")
+        col_t2.metric("IVA Repercutido (Devengado al 21%)", f"{iva_repercutido:,.2f} €")
+        
+        st.write("---")
+        st.write("**Gastos del Trimestre (Introducción manual)**")
+        st.caption("Como la app actualmente solo registra ventas, introduce aquí el total de tus facturas de gastos para calcular el resultado final de IVA.")
+        
+        col_t3, col_t4, col_t5 = st.columns(3)
+        with col_t3:
+            gastos_brutos = st.number_input("Total Gastos (Base Imponible) €", min_value=0.0, step=10.0, format="%.2f")
+        with col_t4:
+            iva_soportado = st.number_input("IVA Soportado (Pagado en compras) €", min_value=0.0, step=10.0, format="%.2f")
+            
+        with col_t5:
+            resultado_iva = iva_repercutido - iva_soportado
+            st.metric(
+                "Resultado Liquidación IVA", 
+                f"{resultado_iva:,.2f} €", 
+                delta="A pagar a Hacienda" if resultado_iva > 0 else "A devolver / Compensar",
+                delta_color="inverse"
+            )
+        
+        # Botón para descargar el informe en texto simple
+        informe_txt = f"""INFORME {trim_sel.upper()} - AÑO {año_sel}
+
+--- INGRESOS (VENTAS) ---
+Base Imponible (Sin IVA): {ingresos_brutos:,.2f} €
+IVA Repercutido (Cobrado): {iva_repercutido:,.2f} €
+
+--- GASTOS (COMPRAS) ---
+Base Imponible (Sin IVA): {gastos_brutos:,.2f} €
+IVA Soportado (Pagado): {iva_soportado:,.2f} €
+
+--- LIQUIDACIÓN DE IVA ---
+IVA Repercutido - IVA Soportado: {resultado_iva:,.2f} €
+({"A pagar a Hacienda" if resultado_iva > 0 else "A devolver o compensar"})
+"""
+        st.download_button(
+            "📥 Descargar Resumen para el Gestor (TXT)",
+            data=informe_txt.encode('utf-8-sig'),
+            file_name=f"Informe_Gestor_{trim_sel.replace(' ', '')}_{año_sel}.txt",
+            mime="text/plain"
+        )
+
+    st.divider()
+
+    # --- 4. TABLA DE REGISTROS EDITABLE ---
     st.write("### 📋 Registro Detallado")
+    
+    # Mejorar la ordenación: por Fecha y luego por Número de Factura (convertido a número)
+    df_mostrar['N_Factura_Num'] = pd.to_numeric(df_mostrar['Nº Factura'], errors='coerce')
+    df_mostrar = df_mostrar.sort_values(by=['Fecha_dt', 'N_Factura_Num'], ascending=[False, False])
     
     columnas_mostrar = ["Nº Factura", "Fecha", "Emisor", "Cliente", "Total sin IVA", "Total con IVA", "Ruta Archivo"]
     df_editor = df_mostrar[columnas_mostrar].copy()
