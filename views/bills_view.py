@@ -218,11 +218,22 @@ def render_bills_view(username):
                     # Registrar la factura en Excel
                     try:
                         from src.utils import registrar_factura
+                        
+                        # Nombre completo del emisor desde counters.json
+                        nombre_emisor = contadores.get(emisor_key, {}).get('nombre_fiscal', emisor_key).upper()
+                        
+                        # Nombre completo del cliente (mapa de claves cortas a nombres reales)
+                        NOMBRES_CLIENTES = {
+                            "belinda": "BELINDA WINGS",
+                            "woven":   "WOVEN LABEL",
+                        }
+                        nombre_cliente = NOMBRES_CLIENTES.get(cliente.lower(), cliente.upper())
+                        
                         registrar_factura(
                             n_factura=res['factura'],
                             fecha=fecha_str,
-                            emisor=emisor_key.upper(),
-                            cliente=cliente.upper(),
+                            emisor=nombre_emisor,
+                            cliente=nombre_cliente,
                             total_sin_iva=total_acumulado,
                             total_con_iva=total_con_iva,
                             ruta_archivo=os.path.basename(ruta)
