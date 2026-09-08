@@ -33,7 +33,7 @@ def render_history_view():
         df_historial['Fecha_dt'] = pd.Timestamp.now()
 
     # --- 1. DASHBOARD DE CONTABILIDAD ANUAL ---
-    with st.expander("📊 Dashboard de Contabilidad Anual", expanded=True):
+    with st.expander("Contabilidad Anual", expanded=True):
         # Mapeo de meses en español
         meses_es = {
             1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
@@ -43,7 +43,7 @@ def render_history_view():
         # Obtener años disponibles
         años_disp = sorted(list(df_historial['Fecha_dt'].dt.year.unique()), reverse=True)
         if años_disp:
-            año_sel = st.selectbox("📅 Seleccionar Año para Análisis:", años_disp, key="dashboard_year")
+            año_sel = st.selectbox("Año para Análisis:", años_disp, key="dashboard_year")
         else:
             año_sel = datetime.now().year
             
@@ -73,7 +73,7 @@ def render_history_view():
             # Gráficos
             col_g1, col_g2 = st.columns(2)
             with col_g1:
-                st.markdown("📈 **Facturación Mensual (con IVA)**")
+                st.markdown("**Facturación Mensual (con IVA)**")
                 # Agrupar por mes y rellenar meses faltantes (1 al 12)
                 df_meses = df_año.groupby(df_año['Fecha_dt'].dt.month)['Total con IVA'].sum().reindex(range(1, 13), fill_value=0.0).reset_index()
                 df_meses.columns = ['mes_num', 'Total con IVA']
@@ -84,7 +84,7 @@ def render_history_view():
 
                 
             with col_g2:
-                st.markdown("🎯 **Facturación por Cliente (con IVA)**")
+                st.markdown("**Facturación por Cliente (con IVA)**")
                 df_cli_año = df_año.groupby('Cliente')['Total con IVA'].sum().reset_index().sort_values(by='Total con IVA', ascending=False)
                 if not df_cli_año.empty:
                     st.bar_chart(df_cli_año.set_index('Cliente')['Total con IVA'], height=250)
