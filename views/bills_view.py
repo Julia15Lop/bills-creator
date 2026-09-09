@@ -183,6 +183,26 @@ def render_bills_view(username):
             st.error(f"❌ No encontré el precio para: {', '.join(prendas_sin_precio)}")
         else:
             try:
+                # 1. Adaptar el DataFrame temporalmente para que engine.py lo entienda
+                df_p_engine = df_precios.rename(columns={
+                    "nombre_articulo": "NOMBRE ARTÍCULO",
+                    "precio_cliente": "PRECIO CLIENTE",
+                    "id_cliente": "ID_CLIENTE"
+                })
+
+                # 2. Consultar datos del emisor
+                res_emisor = supabase.table("emisor_config").select("*").eq("user_key", emisor_key.lower().strip()).execute()
+                datos_fiscales = res_emisor.data[0] if res_emisor.data else {"nombre_fiscal": emisor_key.upper()}
+                
+                num_factura_siguiente = int(datos_fiscales.get("ultimo_numero") or 0) + 1
+                datos_fiscales["ultimo_numero"] = num_factura_siguiente
+
+                # 3. Generar Factura ODS
+                res = procesar_factura(emisor_key, cliente, fecha_str, objetivo, pedido_limpio, df_p_engine, datos_fiscales)
+                res['factura'] = str(num_factura_siguiente)
+                ruta = generar_ods(res)
+
+                # --- Mostrar Métricas y Botón de Descarga ---
                 st.divider()
                 c1, c2 = st.columns([2, 1])
                 total_con_iva = round(total_acumulado * 1.21, 2)
@@ -192,61 +212,58 @@ def render_bills_view(username):
                     if total_con_iva > objetivo:
                         st.warning(f"⚠️ Te has pasado del objetivo por {(total_con_iva - objetivo):.2f} €")
 
-                # Obtener el número de factura directamente desde Supabase
-                num_factura_siguiente = obtener_siguiente_numero_factura(emisor_key)
-
-                # Generar archivo ODS localmente para descarga
-                datos_fiscales = {"nombre_fiscal": emisor_key.upper()}
-                res = procesar_factura(emisor_key, cliente, fecha_str, objetivo, pedido_limpio, df_precios, datos_fiscales)
-                res['factura'] = num_factura_siguiente  # Forzar el número incremental de Supabase
-                ruta = generar_ods(res)
-                
                 with c1:
                     st.success(f"✅ Factura Nº {res['factura']} generada con éxito.")
-                    with open(ruta, "rb") as f:
-                        st.download_button("📥 Descargar Factura", f, file_name=os.path.basename(ruta))
+                    if os.path.exists(ruta):
+                        with open(ruta, "rb") as f:
+                            st.download_button(
+                                label="📥 Descargar Factura (.ods)",
+                                data=f,
+                                file_name=os.path.basename(ruta),
+                                mime="application/vnd.oasis.opendocument.spreadsheet",
+                                use_container_width=True
+                            )
 
-                # ========================================================
-                # REGISTRO EN SUPABASE (ENCABEZADO + LINEAS + CONTADORES)
-                # ========================================================
-                if supabase:
-                    try:
-                        # 1. Insertar Factura (Encabezado con nombres reales de columnas)
-                        factura_payload = {
-                            "numero_factura": str(res['factura']),
-                            "fecha_emision": fecha_sel.isoformat(),
-                            "user_key": emisor_key,
-                            "id_cliente": cliente,
-                            "base_imponible": total_acumulado,
-                            "total_factura": total_con_iva,
-                            "estado": "Pendiente"
-                        }
+                # 4. Guardar en Supabase (Encabezado)
+                factura_payload = {
+                    "numero_factura": str(res['factura']),
+                    "fecha_emision": fecha_sel.isoformat(),
+                    "user_key": emisor_key,
+                    "id_cliente": cliente,
+                    "base_imponible": total_acumulado,
+                    "total_factura": total_con_iva,
+                    "estado": "Pendiente"
+                }
+                res_fac = supabase.table("facturas_encabezado").insert(factura_payload).execute()
+
+                # 5. Guardar Líneas e Incrementar Contador
+                if res_fac.data:
+                    factura_id = res_fac.data[0]["id"]
+                    lineas_payload = []
+
+                    for prenda_nombre, desgloses in pedido_limpio.items():
+                        match = df_precios[df_precios[col_nombre].astype(str).str.strip().str.upper() == prenda_nombre.upper()]
                         
-                        res_fac = supabase.table("facturas_encabezado").insert(factura_payload).execute()
-                        
-                        if res_fac.data:
-                            factura_id = res_fac.data[0]["id"]
-                            
-                            # 2. Insertar Detalles de Líneas
-                            lineas_payload = []
-                            for prenda_nombre, desgloses in pedido_limpio.items():
-                                for talla, cantidad in desgloses.items():
-                                    lineas_payload.append({
-                                        "factura_id": factura_id,
-                                        "prenda": prenda_nombre,
-                                        "talla": talla,
-                                        "cantidad": cantidad
-                                    })
-                            
-                            if lineas_payload:
-                                supabase.table("facturas_lineas").insert(lineas_payload).execute()
-                            
-                            # 3. Incrementar Contador en Supabase
-                            incrementar_contador_factura(emisor_key)
-                            
-                            st.info("✅ Factura, desglose y contador guardados correctamente en Supabase.")
-                    except Exception as sp_err:
-                        st.error(f"Error al sincronizar con Supabase: {sp_err}")
+                        p_unitario = 0.0
+                        if not match.empty:
+                            p_unitario = limpiar_precio(match.iloc[0][col_precio])
+
+                        for talla, cantidad in desgloses.items():
+                            if cantidad > 0:
+                                lineas_payload.append({
+                                    "factura_id": factura_id,
+                                    "nombre_articulo": prenda_nombre,
+                                    "talla": talla,
+                                    "cantidad": cantidad,
+                                    "precio_unitario": p_unitario,
+                                    "subtotal": round(cantidad * p_unitario, 2)
+                                })
+
+                    if lineas_payload:
+                        supabase.table("facturas_lineas").insert(lineas_payload).execute()
+
+                    # Actualizar contador en emisor_config
+                    supabase.table("emisor_config").update({"ultimo_numero": num_factura_siguiente}).eq("user_key", emisor_key.lower().strip()).execute()
 
                 st.balloons()
             except Exception as e:

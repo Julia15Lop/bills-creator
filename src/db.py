@@ -137,29 +137,31 @@ def delete_precio_by_id(precio_id: int) -> bool:
         st.error(f"Error al borrar producto #{precio_id}: {e}")
         return False
 
-def obtener_siguiente_numero_factura(user_key: str = "arturo") -> str:
+def obtener_siguiente_numero_factura(emisor_key: str) -> int:
     supabase = get_supabase_client()
     if not supabase:
-        return "1"
+        return 1
     try:
-        res = supabase.table("emisor_config").select("ultimo_numero").eq("user_key", user_key).execute()
-        if res.data and len(res.data) > 0 and res.data[0].get("ultimo_numero") is not None:
-            return str(int(res.data[0]["ultimo_numero"]) + 1)
-        return "1"
+        # Consulta el ultimo_numero del emisor (arturo o carmen)
+        res = supabase.table("emisor_config").select("ultimo_numero").eq("user_key", emisor_key.lower().strip()).execute()
+        if res.data and len(res.data) > 0:
+            ultimo = res.data[0].get("ultimo_numero") or 0
+            return int(ultimo) + 1
+        return 1
     except Exception as e:
-        print(f"Error leyendo contador: {e}")
-        return "1"
+        print(f"Error consultando contador para {emisor_key}: {e}")
+        return 1
 
-def incrementar_contador_factura(user_key: str = "arturo"):
+def incrementar_contador_factura(emisor_key: str):
     supabase = get_supabase_client()
     if not supabase:
         return
     try:
-        siguiente = int(obtener_siguiente_numero_factura(user_key))
-        # Actualizamos 'ultimo_numero' en emisor_config
-        supabase.table("emisor_config").update({"ultimo_numero": siguiente}).eq("user_key", user_key).execute()
+        siguiente_numero = obtener_siguiente_numero_factura(emisor_key)
+        # Actualiza el ultimo_numero directamente en emisor_config
+        supabase.table("emisor_config").update({"ultimo_numero": siguiente_numero}).eq("user_key", emisor_key.lower().strip()).execute()
     except Exception as e:
-        st.error(f"Error al actualizar contador: {e}")
+        print(f"Error actualizando contador para {emisor_key}: {e}")
 
 def delete_factura_by_id(factura_id: int) -> bool:
     """Elimina una factura y sus líneas asociadas en Supabase."""
