@@ -6,6 +6,18 @@ from datetime import datetime
 from src.engine import procesar_factura
 from src.bills_gen import generar_ods
 from src.utils import limpiar_precio
+from supabase import create_client  # Requiere: pip install supabase
+
+# Inicialización del cliente Supabase desde Secrets o Entorno
+@st.cache_resource
+def init_supabase():
+    url = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+    key = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
+    if not url or not key:
+        return None
+    return create_client(url, key)
+
+supabase = init_supabase()
 
 def render_bills_view(username):
     PATH_COUNTERS = 'data/counters.json'
@@ -96,7 +108,7 @@ def render_bills_view(username):
             limpiar_campos()
             st.rerun()
 
-    # Cargar prendas asociadas al cliente seleccionado para el autocompletado/sugerencia
+    # Cargar prendas asociadas al cliente seleccionado
     lista_prendas = []
     if os.path.exists(PATH_PRECIOS):
         try:
@@ -157,7 +169,6 @@ def render_bills_view(username):
                     st.session_state.pre_total_err = f"Error al calcular: {e}"
                     st.session_state.pre_total_data = None
 
-    # Mostrar métricas del Pre-total si están guardadas en el estado
     if "pre_total_err" in st.session_state and st.session_state.pre_total_err:
         st.error(st.session_state.pre_total_err)
     elif "pre_total_data" in st.session_state and st.session_state.pre_total_data:
@@ -205,7 +216,7 @@ def render_bills_view(username):
                         if total_con_iva > objetivo:
                             st.warning(f"⚠️ ¡Ojo! Te has pasado del objetivo por {(total_con_iva - objetivo):.2f} €")
 
-                    # Generar Factura
+                    # Generar Factura en el motor
                     datos_fiscales = contadores[emisor_key]
                     res = procesar_factura(emisor_key, cliente, fecha_str, objetivo, pedido_limpio, df_p, datos_fiscales)
                     ruta = generar_ods(res)
@@ -215,20 +226,53 @@ def render_bills_view(username):
                         with open(ruta, "rb") as f:
                             st.download_button("📥 Descargar Factura", f, file_name=os.path.basename(ruta))
                     
-                    # Registrar la factura en Excel
+                    # Nombres extendidos de Emisor y Cliente
+                    nombre_emisor = contadores.get(emisor_key, {}).get('nombre_fiscal', emisor_key).upper()
+                    NOMBRES_CLIENTES = {"belinda": "BELINDA WINGS", "woven": "WOVEN LABEL"}
+                    nombre_cliente = NOMBRES_CLIENTES.get(cliente.lower(), cliente.upper())
+
+                    # ==========================================
+                    # REGISTRO EN SUPABASE (ENCABEZADO + LINEAS)
+                    # ==========================================
+                    if supabase:
+                        try:
+                            # 1. Insertar Factura (Encabezado)
+                            factura_payload = {
+                                "numero_factura": res['factura'],
+                                "fecha": fecha_sel.isoformat(),
+                                "emisor": nombre_emisor,
+                                "cliente": nombre_cliente,
+                                "total_sin_iva": total_acumulado,
+                                "total_con_iva": total_con_iva,
+                                "archivo_ods": os.path.basename(ruta)
+                            }
+                            
+                            res_fac = supabase.table("facturas_encabezado").insert(factura_payload).execute()
+                            
+                            if res_fac.data:
+                                factura_id = res_fac.data[0]["id"]
+                                
+                                # 2. Preparar e Insertar Detalles de Líneas
+                                lineas_payload = []
+                                for prenda_nombre, desgloses in pedido_limpio.items():
+                                    for talla, cantidad in desgloses.items():
+                                        lineas_payload.append({
+                                            "factura_id": factura_id,
+                                            "prenda": prenda_nombre,
+                                            "talla": talla,
+                                            "cantidad": cantidad
+                                        })
+                                
+                                if lineas_payload:
+                                    supabase.table("facturas_lineas").insert(lineas_payload).execute()
+                                
+                                st.info("Factura y líneas guardadas en Supabase.")
+                        except Exception as sp_err:
+                            st.warning(f"Error al sincronizar con Supabase: {sp_err}")
+
+                    # Registrar la factura en Excel / Historial local
                     try:
                         from src.utils import registrar_factura
-                        
-                        # Nombre completo del emisor desde counters.json
-                        nombre_emisor = contadores.get(emisor_key, {}).get('nombre_fiscal', emisor_key).upper()
-                        
-                        # Nombre completo del cliente (mapa de claves cortas a nombres reales)
-                        NOMBRES_CLIENTES = {
-                            "belinda": "BELINDA WINGS",
-                            "woven":   "WOVEN LABEL",
-                        }
-                        nombre_cliente = NOMBRES_CLIENTES.get(cliente.lower(), cliente.upper())
-                        
                         registrar_factura(
                             n_factura=res['factura'],
                             fecha=fecha_str,
@@ -239,9 +283,9 @@ def render_bills_view(username):
                             ruta_archivo=os.path.basename(ruta)
                         )
                     except Exception as reg_err:
-                        st.warning(f"⚠️ No se pudo registrar la factura en el historial: {reg_err}")
+                        st.warning(f"⚠️ No se pudo registrar la factura localmente: {reg_err}")
                     
-                    # Actualizar JSON
+                    # Actualizar JSON local de contadores
                     contadores[emisor_key]['ultimo_numero'] = res['factura']
                     with open(PATH_COUNTERS, 'w', encoding='utf-8') as f:
                         json.dump(contadores, f, indent=2, ensure_ascii=False)

@@ -1,95 +1,88 @@
 import streamlit as st
 import pandas as pd
-import os
+from src.db import get_precios_df, save_precios_df
 
 def render_prices_view():
-    PATH_PRECIOS = 'data/listado_precios_clientes.xlsx'
     st.subheader("🏷️ Listado de Precios")
 
-    if not os.path.exists(PATH_PRECIOS):
-        st.error(f"🚨 No se encuentra el archivo: {PATH_PRECIOS}")
-        st.info("Asegúrate de que la carpeta 'data' existe y tiene el archivo .xlsx")
+    try:
+        df_precios = get_precios_df()
+    except Exception as e:
+        st.error(f"Error al cargar la tabla de precios: {e}")
         return
 
-    df_precios = pd.read_excel(PATH_PRECIOS)
+    # Mapeo de columnas de Supabase a nombres para pantalla
+    col_map = {
+        "codigo_articulo": "CÓDIGO",
+        "coleccion": "COLECCIÓN",
+        "nombre_articulo": "NOMBRE ARTÍCULO",
+        "categoria": "CATEGORÍA",
+        "id_cliente": "CLIENTE",
+        "precio_cliente": "PRECIO CLIENTE (€)",
+        "precio_confeccion": "PRECIO CONFECCIÓN (€)"
+    }
+    
+    if not df_precios.empty:
+        df_renamed = df_precios.rename(columns=col_map)
+    else:
+        # Si la tabla está vacía, generamos la estructura básica
+        df_renamed = pd.DataFrame(columns=["id", "user_key"] + list(col_map.values()))
 
-    # --- FILTROS SUPERIORES ---
+    # --- 1. ORDENACIÓN LIMPIA ---
+    if "COLECCIÓN" in df_renamed.columns and not df_renamed.empty:
+        df_renamed = df_renamed.sort_values(by=["COLECCIÓN", "NOMBRE ARTÍCULO"], ascending=True).reset_index(drop=True)
+
+    # --- 2. FILTROS ---
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        clientes_disp = ["Todos"] + sorted(list(df_precios['ID_CLIENTE'].unique()))
-        cliente_sel = st.selectbox("🎯 Filtrar por Cliente:", clientes_disp)
+        clientes_disp = ["Todos"] + sorted([str(c) for c in df_renamed['CLIENTE'].dropna().unique() if c])
+        cliente_sel = st.selectbox("🎯 Filtrar por Cliente:", clientes_disp, key="pv_filtro_cli")
     
     with col_f2:
-        busqueda = st.text_input("🔍 Buscar Modelo/Referencia:", "")
+        busqueda = st.text_input("🔍 Buscar Modelo/Referencia:", "", key="pv_filtro_busq")
 
-    # Aplicar filtros a la copia de visualización
-    df_mostrar = df_precios.copy()
+    df_mostrar = df_renamed.copy()
     if cliente_sel != "Todos":
-        df_mostrar = df_mostrar[df_mostrar['ID_CLIENTE'] == cliente_sel]
-    if busqueda:
+        df_mostrar = df_mostrar[df_mostrar['CLIENTE'] == cliente_sel]
+    if busqueda and "NOMBRE ARTÍCULO" in df_mostrar.columns:
         df_mostrar = df_mostrar[df_mostrar['NOMBRE ARTÍCULO'].str.contains(busqueda, case=False, na=False)]
 
-    # --- TABLA EDITABLE CON FILTROS INTERNOS ---
-    st.caption("💡 También puedes filtrar por Categoría o Colección en los iconos 🔍 de la tabla.")
+    # --- 3. CONFIGURACIÓN DE COLUMNAS VISIBLES (OCULTAR ID) ---
+    # Mantenemos 'id' en la estructura interna de df_mostrar pero indicamos a column_order que solo renderice las visibles
+    cols_pantalla = [c for c in df_mostrar.columns if c not in ['id', 'user_key', 'created_at']]
+
+    st.caption("💡 Puedes editar registros o pulsar el botón '+' al final de la tabla para agregar un nuevo producto.")
+    
+    # Editor interactivo
     df_editado = st.data_editor(
-        df_mostrar, 
+        df_mostrar,
+        column_order=cols_pantalla,  # <-- Oculta 'id' visualmente
         use_container_width=True, 
-        num_rows="dynamic",
-        key="editor_maestro_definitivo"
+        num_rows="dynamic",           # <-- Permite agregar nuevas filas con el '+'
+        key="pv_editor_definitivo",
+        column_config={
+            "PRECIO CLIENTE (€)": st.column_config.NumberColumn("PRECIO CLIENTE (€)", format="%.2f €", default=0.0),
+            "PRECIO CONFECCIÓN (€)": st.column_config.NumberColumn("PRECIO CONFECCIÓN (€)", format="%.2f €", default=0.0),
+            "NOMBRE ARTÍCULO": st.column_config.TextColumn("NOMBRE ARTÍCULO", required=True)
+        }
     )
 
-    # --- BOTONES ---
     st.divider()
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
 
     with c1:
-        if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
+        if st.button("💾 Guardar Cambios en Supabase", type="primary", use_container_width=True, key="pv_btn_guardar_definitivo"):
             try:
-                from src.utils import limpiar_precio
-                
-                # Obtener los cambios del editor de Streamlit
-                state = st.session_state.get("editor_maestro_definitivo", {})
-                
-                if state:
-                    # 1. Filas editadas
-                    edited_rows = state.get("edited_rows", {})
-                    for pos_str, changes in edited_rows.items():
-                        pos = int(pos_str)
-                        actual_idx = df_mostrar.index[pos]
-                        for col, val in changes.items():
-                            if col in ['PRECIO CLIENTE', 'PRECIO CONFECCIÓN']:
-                                val = limpiar_precio(val)
-                            df_precios.at[actual_idx, col] = val
-                    
-                    # 2. Filas eliminadas
-                    deleted_rows = state.get("deleted_rows", {})
-                    if deleted_rows:
-                        indices_to_drop = [df_mostrar.index[pos] for pos in deleted_rows]
-                        df_precios = df_precios.drop(index=indices_to_drop)
-                    
-                    # 3. Filas añadidas
-                    added_rows = state.get("added_rows", {})
-                    if added_rows:
-                        for row in added_rows:
-                            for col in ['PRECIO CLIENTE', 'PRECIO CONFECCIÓN']:
-                                if col in row:
-                                    row[col] = limpiar_precio(row[col])
-                                else:
-                                    row[col] = 0.0
-                        df_added = pd.DataFrame(added_rows)
-                        df_precios = pd.concat([df_precios, df_added], ignore_index=True)
-                
-                df_precios.to_excel(PATH_PRECIOS, engine='openpyxl', index=False)
-                st.success("✅ Cambios guardados.")
+                # Invertir nombres para enviarlos a las columnas de Supabase
+                rev_map = {v: k for k, v in col_map.items()}
+                df_to_save = df_editado.rename(columns=rev_map)
+
+                save_precios_df(df_to_save)
+                st.success("✅ Precios y nuevos productos guardados con éxito en Supabase.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
 
     with c2:
-        csv = df_editado.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Excel", data=csv, file_name="precios.csv", use_container_width=True)
-
-    with c3:
-        html_table = df_editado.to_html(index=False, border=1)
-        html_final = f"<html><style>table{{width:100%;border-collapse:collapse;}}th,td{{padding:8px;border:1px dotted #ccc;}}</style><body>{html_table}</body></html>"
-        st.download_button("🖨️ PDF (HTML)", data=html_final, file_name="imprimir.html", mime="text/html", use_container_width=True)
+        csv = df_editado[cols_pantalla].to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Exportar Catálogo a CSV", data=csv, file_name="catalogo_precios.csv", mime="text/csv", use_container_width=True, key="pv_btn_csv_definitivo")

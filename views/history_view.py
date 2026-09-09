@@ -1,57 +1,69 @@
 import streamlit as st
 import pandas as pd
-import os
 from datetime import datetime
+from src.db import get_facturas_df, save_facturas_df
 
 def render_history_view():
-    PATH_REGISTRO = 'data/registro_facturas.xlsx'
     st.subheader("📊 Historial de Facturas y Cobros")
 
-    if not os.path.exists(PATH_REGISTRO):
-        st.info("ℹ️ Aún no se ha registrado ninguna factura. Las facturas nuevas que generes se guardarán aquí automáticamente.")
-        return
-
     try:
-        df_historial = pd.read_excel(PATH_REGISTRO)
+        df_historial = get_facturas_df()
     except Exception as e:
-        st.error(f"Error al leer el historial: {e}")
+        st.error(f"Error al cargar el historial desde Supabase: {e}")
         return
 
     if df_historial.empty:
-        st.info("ℹ️ El registro de facturas está vacío.")
+        st.info("ℹ️ No hay facturas en el registro de Supabase.")
         return
 
-    # Asegurarnos de que el formato de las columnas sea correcto
-    df_historial['Nº Factura'] = df_historial['Nº Factura'].astype(str)
+    # Normalización y compatibilidad de nombres de columnas
+    df_historial['Nº Factura'] = df_historial.get('numero_factura', pd.Series(dtype=str)).astype(str)
     
-    # Procesar fechas para filtros y dashboard
+    # Manejo de la fecha según la columna que venga de Supabase
+    if 'fecha_emision' in df_historial.columns and not df_historial['fecha_emision'].isna().all():
+        df_historial['Fecha'] = df_historial['fecha_emision']
+    elif 'fecha' in df_historial.columns:
+        df_historial['Fecha'] = df_historial['fecha']
+    else:
+        df_historial['Fecha'] = str(datetime.now().date())
+
+    # Emisor y Cliente
+    df_historial['Emisor'] = df_historial['user_key'] if 'user_key' in df_historial.columns else df_historial.get('emisor', 'N/A')
+    
+    if 'cliente' in df_historial.columns and not df_historial['cliente'].isna().all():
+        df_historial['Cliente'] = df_historial['cliente']
+    else:
+        df_historial['Cliente'] = df_historial.get('id_cliente', 'N/A')
+
+    # Importes
+    df_historial['Total sin IVA'] = df_historial.get('base_imponible', 0.0).astype(float)
+    df_historial['Total con IVA'] = df_historial.get('total_factura', 0.0).astype(float)
+    
+    # Estado de Cobro
+    if 'estado' not in df_historial.columns:
+        df_historial['estado'] = 'Pendiente'
+    df_historial['estado'] = df_historial['estado'].fillna('Pendiente')
+
+    # Conversión de fechas a datetime para gráficos y filtros
     try:
-        # Convertir a datetime para poder ordenar y agrupar por mes/año de forma flexible
-        df_historial['Fecha_dt'] = pd.to_datetime(df_historial['Fecha'], format='mixed', dayfirst=True, errors='coerce')
+        df_historial['Fecha_dt'] = pd.to_datetime(df_historial['Fecha'], format='mixed', errors='coerce')
         df_historial['Fecha_dt'] = df_historial['Fecha_dt'].fillna(pd.Timestamp.now())
     except Exception:
         df_historial['Fecha_dt'] = pd.Timestamp.now()
 
     # --- 1. DASHBOARD DE CONTABILIDAD ANUAL ---
     with st.expander("Contabilidad Anual", expanded=True):
-        # Mapeo de meses en español
         meses_es = {
             1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
             7: "Jul", 8: "Ago", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic"
         }
         
-        # Obtener años disponibles
         años_disp = sorted(list(df_historial['Fecha_dt'].dt.year.unique()), reverse=True)
-        if años_disp:
-            año_sel = st.selectbox("Año para Análisis:", años_disp, key="dashboard_year")
-        else:
-            año_sel = datetime.now().year
+        año_sel = st.selectbox("Año para Análisis:", años_disp, key="hv_year_select") if años_disp else datetime.now().year
             
-        # Filtrar datos de ese año
         df_año = df_historial[df_historial['Fecha_dt'].dt.year == año_sel].copy()
         
         if not df_año.empty:
-            # Métricas del Año
             tot_sin_iva_año = df_año['Total sin IVA'].sum()
             tot_con_iva_año = df_año['Total con IVA'].sum()
             iva_año = tot_con_iva_año - tot_sin_iva_año
@@ -59,30 +71,21 @@ def render_history_view():
             
             st.markdown(f"#### Resumen Financiero Anual ({año_sel})")
             col_a1, col_a2, col_a3, col_a4 = st.columns(4)
-            with col_a1:
-                st.metric("Total Facturado (Sin IVA)", f"{tot_sin_iva_año:,.2f} €")
-            with col_a2:
-                st.metric("IVA Acumulado (21%)", f"{iva_año:,.2f} €")
-            with col_a3:
-                st.metric("Total Neto Cobrado (Con IVA)", f"{tot_con_iva_año:,.2f} €")
-            with col_a4:
-                st.metric("Facturas Emitidas", f"{cant_facturas_año}")
+            col_a1.metric("Total Facturado (Sin IVA)", f"{tot_sin_iva_año:,.2f} €")
+            col_a2.metric("IVA Acumulado (21%)", f"{iva_año:,.2f} €")
+            col_a3.metric("Total Neto Cobrado (Con IVA)", f"{tot_con_iva_año:,.2f} €")
+            col_a4.metric("Facturas Emitidas", f"{cant_facturas_año}")
                 
             st.divider()
             
-            # Gráficos
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 st.markdown("**Facturación Mensual (con IVA)**")
-                # Agrupar por mes y rellenar meses faltantes (1 al 12)
                 df_meses = df_año.groupby(df_año['Fecha_dt'].dt.month)['Total con IVA'].sum().reindex(range(1, 13), fill_value=0.0).reset_index()
                 df_meses.columns = ['mes_num', 'Total con IVA']
-                # Prefijo numérico para garantizar orden cronológico (01-Ene, 02-Feb...)
                 df_meses['Mes'] = df_meses['mes_num'].apply(lambda n: f"{n:02d}-{meses_es.get(n, str(n))}")
-                df_meses = df_meses.sort_values('mes_num')
-                st.bar_chart(df_meses.set_index('Mes')['Total con IVA'], height=250)
+                st.bar_chart(df_meses.sort_values('mes_num').set_index('Mes')['Total con IVA'], height=250)
 
-                
             with col_g2:
                 st.markdown("**Facturación por Cliente (con IVA)**")
                 df_cli_año = df_año.groupby('Cliente')['Total con IVA'].sum().reset_index().sort_values(by='Total con IVA', ascending=False)
@@ -95,29 +98,20 @@ def render_history_view():
 
     st.write("---")
 
-    # --- 2. FILTROS DE CONSULTA MENSUAL ---
+    # --- 2. FILTROS DE CONSULTA ---
     st.write("### 🔍 Consultas y Búsquedas")
     
-    # Crear copia para aplicar filtros de visualización
     df_mostrar = df_historial.copy().sort_values(by='Fecha_dt', ascending=False)
     df_mostrar['Mes_Año_Str'] = df_mostrar['Fecha_dt'].apply(lambda x: f"{meses_es.get(x.month, '')} {x.year}")
     
     col_f1, col_f2, col_f3 = st.columns(3)
-    
     with col_f1:
-        meses_unicos = df_mostrar['Mes_Año_Str'].unique().tolist()
-        opciones_mes = ["Todos"] + meses_unicos
-        mes_sel = st.selectbox("📅 Filtrar por Mes/Año:", opciones_mes)
-
+        mes_sel = st.selectbox("📅 Filtrar por Mes/Año:", ["Todos"] + df_mostrar['Mes_Año_Str'].unique().tolist(), key="hv_filter_month")
     with col_f2:
-        clientes_disp = ["Todos"] + sorted(list(df_historial['Cliente'].dropna().unique()))
-        cliente_sel = st.selectbox("🎯 Filtrar por Cliente:", clientes_disp)
-
+        cliente_sel = st.selectbox("🎯 Filtrar por Cliente:", ["Todos"] + sorted(list(df_historial['Cliente'].dropna().unique())), key="hv_filter_client")
     with col_f3:
-        emisores_disp = ["Todos"] + sorted(list(df_historial['Emisor'].dropna().unique()))
-        emisor_sel = st.selectbox("👤 Filtrar por Emisor:", emisores_disp)
+        emisor_sel = st.selectbox("👤 Filtrar por Emisor:", ["Todos"] + sorted(list(df_historial['Emisor'].dropna().unique())), key="hv_filter_emisor")
 
-    # Aplicar Filtros
     if mes_sel != "Todos":
         df_mostrar = df_mostrar[df_mostrar['Mes_Año_Str'] == mes_sel]
     if cliente_sel != "Todos":
@@ -125,159 +119,91 @@ def render_history_view():
     if emisor_sel != "Todos":
         df_mostrar = df_mostrar[df_mostrar['Emisor'] == emisor_sel]
 
-    # --- MÉTRICAS DE LA SELECCIÓN FILTRADA ---
     total_sin_iva = df_mostrar['Total sin IVA'].sum()
     total_con_iva = df_mostrar['Total con IVA'].sum()
     iva_acumulado = total_con_iva - total_sin_iva
-    cant_facturas = len(df_mostrar)
 
     st.write("### 📈 Resumen Financiero (Selección Actual)")
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    with col_m1:
-        st.metric("Total Facturado (Sin IVA)", f"{total_sin_iva:,.2f} €")
-    with col_m2:
-        st.metric("IVA Acumulado (21%)", f"{iva_acumulado:,.2f} €")
-    with col_m3:
-        st.metric("Total Cobrado (Con IVA)", f"{total_con_iva:,.2f} €")
-    with col_m4:
-        st.metric("Facturas Emitidas", f"{cant_facturas}")
+    col_m1.metric("Total Facturado (Sin IVA)", f"{total_sin_iva:,.2f} €")
+    col_m2.metric("IVA Acumulado (21%)", f"{iva_acumulado:,.2f} €")
+    col_m3.metric("Total Cobrado (Con IVA)", f"{total_con_iva:,.2f} €")
+    col_m4.metric("Facturas Emitidas", f"{len(df_mostrar)}")
 
     st.divider()
 
-    # --- 3. INFORME TRIMESTRAL PARA EL GESTOR ---
+    # --- 3. INFORME TRIMESTRAL ---
     st.write("### 📝 Informe Trimestral (para el gestor)")
-    
-    # Añadir columna de trimestre
     df_año_trim = df_año.copy()
     df_año_trim['Trimestre'] = df_año_trim['Fecha_dt'].dt.quarter
-    
     trimestres_disp = sorted(df_año_trim['Trimestre'].dropna().unique())
-    if not trimestres_disp:
-        st.info("No hay datos suficientes para el informe trimestral en este año.")
-    else:
-        trim_sel = st.selectbox("Seleccionar Trimestre:", [f"Trimestre {int(t)}" for t in trimestres_disp])
+    
+    if trimestres_disp:
+        trim_sel = st.selectbox("Seleccionar Trimestre:", [f"Trimestre {int(t)}" for t in trimestres_disp], key="hv_filter_quarter")
         trim_num = int(trim_sel[-1])
         
         df_trim = df_año_trim[df_año_trim['Trimestre'] == trim_num]
         ingresos_brutos = df_trim['Total sin IVA'].sum()
         iva_repercutido = df_trim['Total con IVA'].sum() - ingresos_brutos
         
-        st.write(f"**Resumen de Ventas (Ingresos) - {trim_sel} del {año_sel}**")
         col_t1, col_t2 = st.columns(2)
         col_t1.metric("Ingresos Brutos (Base Imponible)", f"{ingresos_brutos:,.2f} €")
         col_t2.metric("IVA Repercutido (Devengado al 21%)", f"{iva_repercutido:,.2f} €")
         
-        st.write("---")
-        st.write("**Gastos del Trimestre (Introducción manual)**")
-        st.caption("Como la app actualmente solo registra ventas, introduce aquí el total de tus facturas de gastos para calcular el resultado final de IVA.")
-        
         col_t3, col_t4, col_t5 = st.columns(3)
         with col_t3:
-            gastos_brutos = st.number_input("Total Gastos (Base Imponible) €", min_value=0.0, step=10.0, format="%.2f")
+            gastos_brutos = st.number_input("Total Gastos (Base Imponible) €", min_value=0.0, step=10.0, format="%.2f", key="hv_input_gastos")
         with col_t4:
-            iva_soportado = st.number_input("IVA Soportado (Pagado en compras) €", min_value=0.0, step=10.0, format="%.2f")
-            
+            iva_soportado = st.number_input("IVA Soportado (Pagado en compras) €", min_value=0.0, step=10.0, format="%.2f", key="hv_input_iva")
         with col_t5:
             resultado_iva = iva_repercutido - iva_soportado
-            st.metric(
-                "Resultado Liquidación IVA", 
-                f"{resultado_iva:,.2f} €", 
-                delta="A pagar a Hacienda" if resultado_iva > 0 else "A devolver / Compensar",
-                delta_color="inverse"
-            )
-        
-        # Botón para descargar el informe en texto simple
-        informe_txt = f"""INFORME {trim_sel.upper()} - AÑO {año_sel}
-
---- INGRESOS (VENTAS) ---
-Base Imponible (Sin IVA): {ingresos_brutos:,.2f} €
-IVA Repercutido (Cobrado): {iva_repercutido:,.2f} €
-
---- GASTOS (COMPRAS) ---
-Base Imponible (Sin IVA): {gastos_brutos:,.2f} €
-IVA Soportado (Pagado): {iva_soportado:,.2f} €
-
---- LIQUIDACIÓN DE IVA ---
-IVA Repercutido - IVA Soportado: {resultado_iva:,.2f} €
-({"A pagar a Hacienda" if resultado_iva > 0 else "A devolver o compensar"})
-"""
-        st.download_button(
-            "📥 Descargar Resumen para el Gestor (TXT)",
-            data=informe_txt.encode('utf-8-sig'),
-            file_name=f"Informe_Gestor_{trim_sel.replace(' ', '')}_{año_sel}.txt",
-            mime="text/plain"
-        )
+            st.metric("Resultado Liquidación IVA", f"{resultado_iva:,.2f} €", 
+                      delta="A pagar a Hacienda" if resultado_iva > 0 else "A devolver / Compensar", delta_color="inverse")
 
     st.divider()
 
-    # --- 4. TABLA DE REGISTROS EDITABLE ---
+    # --- 4. TABLA DETALLADA EDITABLE CON ESTADO ---
     st.write("### 📋 Registro Detallado")
     
-    # Mejorar la ordenación: por Fecha y luego por Número de Factura (convertido a número)
-    df_mostrar['N_Factura_Num'] = pd.to_numeric(df_mostrar['Nº Factura'], errors='coerce')
-    df_mostrar = df_mostrar.sort_values(by=['Fecha_dt', 'N_Factura_Num'], ascending=[False, False])
+    columnas_base = ["id", "numero_factura", "fecha_emision", "fecha", "user_key", "cliente", "id_cliente", "base_imponible", "total_factura", "estado"]
+    cols_existentes = [c for c in columnas_base if c in df_mostrar.columns]
     
-    columnas_mostrar = ["Nº Factura", "Fecha", "Emisor", "Cliente", "Total sin IVA", "Total con IVA", "Ruta Archivo"]
-    df_editor = df_mostrar[columnas_mostrar].copy()
+    df_editor = df_mostrar[cols_existentes].copy()
 
-    df_editado = st.data_editor(
+    edited_df = st.data_editor(
         df_editor,
         use_container_width=True,
         num_rows="dynamic",
-        key="editor_historial_facturas"
+        key="hv_editor_table_final",
+        column_config={
+            "id": st.column_config.NumberColumn("ID", disabled=True),
+            "numero_factura": "Nº Factura",
+            "fecha_emision": "Fecha Emisión",
+            "fecha": "Fecha",
+            "user_key": "Emisor",
+            "cliente": "Cliente",
+            "id_cliente": "ID Cliente",
+            "base_imponible": st.column_config.NumberColumn("Base Imponible (€)", format="%.2f €"),
+            "total_factura": st.column_config.NumberColumn("Total (€)", format="%.2f €"),
+            "estado": st.column_config.SelectboxColumn(
+                "Estado Cobro",
+                help="Cambia el estado del cobro de la factura",
+                options=["Cobrada", "Pendiente", "Anulada"],
+                required=True
+            )
+        }
     )
 
-    # --- BOTONES ---
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("💾 Guardar Cambios en Historial", type="primary", use_container_width=True):
+        if st.button("💾 Guardar Cambios en Supabase", type="primary", use_container_width=True, key="hv_btn_save_final"):
             try:
-                from src.utils import limpiar_precio
-                
-                # Obtener los cambios del editor de Streamlit
-                state = st.session_state.get("editor_historial_facturas", {})
-                
-                if state:
-                    # 1. Filas editadas
-                    edited_rows = state.get("edited_rows", {})
-                    for pos_str, changes in edited_rows.items():
-                        pos = int(pos_str)
-                        actual_idx = df_editor.index[pos]
-                        for col, val in changes.items():
-                            if col in ['Total sin IVA', 'Total con IVA']:
-                                val = limpiar_precio(val)
-                            df_historial.at[actual_idx, col] = val
-                    
-                    # 2. Filas eliminadas
-                    deleted_rows = state.get("deleted_rows", {})
-                    if deleted_rows:
-                        indices_to_drop = [df_editor.index[pos] for pos in deleted_rows]
-                        df_historial = df_historial.drop(index=indices_to_drop)
-                    
-                    # 3. Filas añadidas
-                    added_rows = state.get("added_rows", {})
-                    if added_rows:
-                        for row in added_rows:
-                            for col in ['Total sin IVA', 'Total con IVA']:
-                                if col in row:
-                                    row[col] = limpiar_precio(row[col])
-                                else:
-                                    row[col] = 0.0
-                        df_added = pd.DataFrame(added_rows)
-                        df_historial = pd.concat([df_historial, df_added], ignore_index=True)
-                
-                df_historial.to_excel(PATH_REGISTRO, engine='openpyxl', index=False)
-                st.success("✅ Cambios guardados con éxito en el historial.")
+                save_facturas_df(edited_df)
+                st.success("✅ Cambios guardados en Supabase.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
 
     with c2:
-        csv = df_editor.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            "📥 Exportar Selección a Excel/CSV",
-            data=csv,
-            file_name=f"historial_facturas_{mes_sel.replace(' ', '_') if mes_sel != 'Todos' else 'completo'}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        csv = edited_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Exportar Selección a CSV", data=csv, file_name="historial_facturas.csv", mime="text/csv", use_container_width=True, key="hv_btn_export_final")

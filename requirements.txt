@@ -7,3 +7,4 @@ openpyxl
 streamlit-authenticator
 O365
 xlsxwriter
+supabase

@@ -25,3 +25,5 @@ __pycache__/
 # Generador de contraseñas
 hash_gen.py
 
+# Secrets de supabase
+.streamlit/secrets.toml
