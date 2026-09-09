@@ -1,41 +1,40 @@
 import streamlit as st
 import pandas as pd
-import json
 import os
 from datetime import datetime
 from src.engine import procesar_factura
 from src.bills_gen import generar_ods
 from src.utils import limpiar_precio
-from supabase import create_client  # Requiere: pip install supabase
+from src.db import (
+    get_precios_df, 
+    obtener_siguiente_numero_factura, 
+    incrementar_contador_factura,
+    get_supabase_client
+)
 
-# Inicialización del cliente Supabase desde Secrets o Entorno
-@st.cache_resource
-def init_supabase():
-    url = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
-    key = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
-    if not url or not key:
-        return None
-    return create_client(url, key)
-
-supabase = init_supabase()
+supabase = get_supabase_client()
 
 def render_bills_view(username):
-    PATH_COUNTERS = 'data/counters.json'
-    PATH_PRECIOS = 'data/listado_precios_clientes.xlsx' 
     TALLAS_COLS = ["T-34", "T-36", "T-38", "T-40", "T-42", "T-44"]
 
-    # 1. Cargar contadores
-    if not os.path.exists(PATH_COUNTERS):
-        st.error(f"No se encuentra {PATH_COUNTERS}")
+    # --- 1. Cargar catálogo de precios desde Supabase ---
+    try:
+        df_precios = get_precios_df()
+    except Exception as e:
+        st.error(f"Error al conectar con el catálogo de precios en Supabase: {e}")
         return
 
-    with open(PATH_COUNTERS, 'r', encoding='utf-8') as f:
-        data_raw = json.load(f)
-        contadores = {str(k).strip().lower(): v for k, v in data_raw.items()}
+    if df_precios.empty:
+        st.warning("⚠️ No hay precios cargados en la base de datos de Supabase.")
+        return
 
+    # Normalización de columnas para compatibilidad
+    col_nombre = 'nombre_articulo' if 'nombre_articulo' in df_precios.columns else 'articulo'
+    col_precio = 'precio_cliente' if 'precio_cliente' in df_precios.columns else 'precio'
+    col_cliente = 'id_cliente' if 'id_cliente' in df_precios.columns else 'cliente'
+
+    # --- Funciones Auxiliares ---
     def calcular_total_pedido(pedido_df, df_p):
-        COL_NOMBRE_EXCEL = 'NOMBRE ARTÍCULO'
-        COL_PRECIO_EXCEL = 'PRECIO CLIENTE'
         pedido_limpio = {}
         total_acumulado = 0.0
         prendas_sin_precio = []
@@ -51,12 +50,11 @@ def render_bills_view(username):
             if cantidades:
                 pedido_limpio[nombre_clean] = cantidades
                 
-                # Buscamos la prenda en tu columna 'NOMBRE ARTÍCULO'
-                match = df_p[df_p[COL_NOMBRE_EXCEL].astype(str).str.strip().str.upper() == nombre_clean]
+                # Búsqueda en el DataFrame de Supabase
+                match = df_p[df_p[col_nombre].astype(str).str.strip().str.upper() == nombre_clean]
                 
                 if not match.empty:
-                    # Usamos tu columna 'PRECIO CLIENTE'
-                    p_unitario = limpiar_precio(match.iloc[0][COL_PRECIO_EXCEL])
+                    p_unitario = limpiar_precio(match.iloc[0][col_precio])
                     total_acumulado += sum(cantidades.values()) * p_unitario
                 else:
                     prendas_sin_precio.append(nombre_clean)
@@ -72,25 +70,21 @@ def render_bills_view(username):
         if "pre_total_err" in st.session_state:
             del st.session_state.pre_total_err
 
-    # 2. Sidebar
+    # --- 2. Sidebar de Configuración ---
     with st.sidebar:
         st.header("⚙️ Configuración")
         user_id = str(username).strip().lower()
-        emisor_key = user_id if user_id != "admin" else st.selectbox("Emisor:", list(contadores.keys()))
+        emisor_key = user_id if user_id != "admin" else "arturo"
         
-        # Cargar clientes dinámicos desde el Excel si está disponible
+        # Clientes dinámicos desde Supabase
         clientes_disp = ["belinda", "woven"]
-        if os.path.exists(PATH_PRECIOS):
-            try:
-                df_p = pd.read_excel(PATH_PRECIOS)
-                if 'ID_CLIENTE' in df_p.columns:
-                    clientes_disp = sorted(df_p['ID_CLIENTE'].dropna().astype(str).str.strip().unique().tolist())
-            except:
-                pass
+        if col_cliente in df_precios.columns:
+            unicos = df_precios[col_cliente].dropna().astype(str).str.strip().unique().tolist()
+            if unicos:
+                clientes_disp = sorted(unicos)
         
         cliente = st.selectbox("Cliente:", clientes_disp)
         
-        # Si cambia el cliente, limpiamos el pedido actual
         if "prev_cliente" not in st.session_state:
             st.session_state.prev_cliente = cliente
         elif st.session_state.prev_cliente != cliente:
@@ -99,7 +93,6 @@ def render_bills_view(username):
             st.rerun()
             
         objetivo = st.number_input("Objetivo (€):", value=2500)
-        
         fecha_sel = st.date_input("Fecha:", datetime.now())
         fecha_str = fecha_sel.strftime('%d/%m/%y')
         
@@ -108,18 +101,11 @@ def render_bills_view(username):
             limpiar_campos()
             st.rerun()
 
-    # Cargar prendas asociadas al cliente seleccionado
-    lista_prendas = []
-    if os.path.exists(PATH_PRECIOS):
-        try:
-            df_p = pd.read_excel(PATH_PRECIOS)
-            COL_NOMBRE_EXCEL = 'NOMBRE ARTÍCULO'
-            df_client = df_p[df_p['ID_CLIENTE'].astype(str).str.strip().str.lower() == cliente.lower()]
-            lista_prendas = sorted(df_client[COL_NOMBRE_EXCEL].dropna().astype(str).str.strip().unique().tolist())
-        except Exception as e:
-            st.error(f"Error al cargar las prendas del cliente: {e}")
+    # Obtener prendas asociadas al cliente desde Supabase
+    df_client = df_precios[df_precios[col_cliente].astype(str).str.strip().str.lower() == cliente.lower()]
+    lista_prendas = sorted(df_client[col_nombre].dropna().astype(str).str.strip().unique().tolist())
 
-    # 3. Tabla de Pedido
+    # --- 3. Tabla de Pedido ---
     st.write(f"### 📋 Pedido: {emisor_key.upper()}")
     
     if 'df_pedido' not in st.session_state:
@@ -137,37 +123,32 @@ def render_bills_view(username):
                 "Nombre Prenda",
                 options=lista_prendas,
                 required=True,
-                help="Selecciona o busca el nombre de la prenda en la lista de precios"
+                help="Selecciona el nombre de la prenda en la lista de precios"
             ),
             **{t: st.column_config.NumberColumn(t, min_value=0, default=0) for t in TALLAS_COLS}
         }
     )
 
-    # 4. Botones de Calcular Pre-total y Generar Factura
+    # --- 4. Botones de Operación ---
     st.divider()
     col_btn1, col_btn2 = st.columns(2)
     
     with col_btn1:
         if st.button("🧮 Calcular Pre-total", use_container_width=True):
-            if not os.path.exists(PATH_PRECIOS):
-                st.error(f"No se encuentra el archivo: {PATH_PRECIOS}")
-            else:
-                try:
-                    df_p = pd.read_excel(PATH_PRECIOS)
-                    total_acumulado, prendas_sin_precio, _ = calcular_total_pedido(pedido_editado, df_p)
-                    
-                    if prendas_sin_precio:
-                        st.session_state.pre_total_err = f"❌ No encontré el precio para: {', '.join(prendas_sin_precio)}. Asegúrate de que el nombre en la tabla sea IGUAL al del Excel."
-                        st.session_state.pre_total_data = None
-                    else:
-                        st.session_state.pre_total_err = None
-                        st.session_state.pre_total_data = {
-                            "total_sin_iva": total_acumulado,
-                            "total_con_iva": round(total_acumulado * 1.21, 2)
-                        }
-                except Exception as e:
-                    st.session_state.pre_total_err = f"Error al calcular: {e}"
+            try:
+                total_acumulado, prendas_sin_precio, _ = calcular_total_pedido(pedido_editado, df_precios)
+                if prendas_sin_precio:
+                    st.session_state.pre_total_err = f"❌ Sin precio para: {', '.join(prendas_sin_precio)}."
                     st.session_state.pre_total_data = None
+                else:
+                    st.session_state.pre_total_err = None
+                    st.session_state.pre_total_data = {
+                        "total_sin_iva": total_acumulado,
+                        "total_con_iva": round(total_acumulado * 1.21, 2)
+                    }
+            except Exception as e:
+                st.session_state.pre_total_err = f"Error al calcular: {e}"
+                st.session_state.pre_total_data = None
 
     if "pre_total_err" in st.session_state and st.session_state.pre_total_err:
         st.error(st.session_state.pre_total_err)
@@ -194,102 +175,79 @@ def render_bills_view(username):
         btn_generar = st.button("🚀 Generar Factura", type="primary", use_container_width=True)
         
     if btn_generar:
-        if not os.path.exists(PATH_PRECIOS):
-            st.error(f"No se encuentra el archivo: {PATH_PRECIOS}")
+        total_acumulado, prendas_sin_precio, pedido_limpio = calcular_total_pedido(pedido_editado, df_precios)
+
+        if not pedido_limpio:
+            st.warning("⚠️ No hay cantidades en la tabla.")
+        elif prendas_sin_precio:
+            st.error(f"❌ No encontré el precio para: {', '.join(prendas_sin_precio)}")
         else:
-            df_p = pd.read_excel(PATH_PRECIOS)
-            total_acumulado, prendas_sin_precio, pedido_limpio = calcular_total_pedido(pedido_editado, df_p)
+            try:
+                st.divider()
+                c1, c2 = st.columns([2, 1])
+                total_con_iva = round(total_acumulado * 1.21, 2)
+                
+                with c2:
+                    st.metric("PRECIO FINAL (con IVA)", f"{total_con_iva:,.2f} €")
+                    if total_con_iva > objetivo:
+                        st.warning(f"⚠️ Te has pasado del objetivo por {(total_con_iva - objetivo):.2f} €")
 
-            if not pedido_limpio:
-                st.warning("⚠️ No hay cantidades en la tabla.")
-            elif prendas_sin_precio:
-                st.error(f"❌ No encontré el precio para: {', '.join(prendas_sin_precio)}")
-                st.info("Asegúrate de que el nombre en la tabla sea IGUAL al del Excel.")
-            else:
-                try:
-                    st.divider()
-                    c1, c2 = st.columns([2, 1])
-                    
-                    total_con_iva = round(total_acumulado * 1.21, 2)
-                    with c2:
-                        st.metric("PRECIO FINAL (con IVA)", f"{total_con_iva:,.2f} €")
-                        if total_con_iva > objetivo:
-                            st.warning(f"⚠️ ¡Ojo! Te has pasado del objetivo por {(total_con_iva - objetivo):.2f} €")
+                # Obtener el número de factura directamente desde Supabase
+                num_factura_siguiente = obtener_siguiente_numero_factura(emisor_key)
 
-                    # Generar Factura en el motor
-                    datos_fiscales = contadores[emisor_key]
-                    res = procesar_factura(emisor_key, cliente, fecha_str, objetivo, pedido_limpio, df_p, datos_fiscales)
-                    ruta = generar_ods(res)
-                    
-                    with c1:
-                        st.success(f"✅ Factura Nº {res['factura']} generada.")
-                        with open(ruta, "rb") as f:
-                            st.download_button("📥 Descargar Factura", f, file_name=os.path.basename(ruta))
-                    
-                    # Nombres extendidos de Emisor y Cliente
-                    nombre_emisor = contadores.get(emisor_key, {}).get('nombre_fiscal', emisor_key).upper()
-                    NOMBRES_CLIENTES = {"belinda": "BELINDA WINGS", "woven": "WOVEN LABEL"}
-                    nombre_cliente = NOMBRES_CLIENTES.get(cliente.lower(), cliente.upper())
+                # Generar archivo ODS localmente para descarga
+                datos_fiscales = {"nombre_fiscal": emisor_key.upper()}
+                res = procesar_factura(emisor_key, cliente, fecha_str, objetivo, pedido_limpio, df_precios, datos_fiscales)
+                res['factura'] = num_factura_siguiente  # Forzar el número incremental de Supabase
+                ruta = generar_ods(res)
+                
+                with c1:
+                    st.success(f"✅ Factura Nº {res['factura']} generada con éxito.")
+                    with open(ruta, "rb") as f:
+                        st.download_button("📥 Descargar Factura", f, file_name=os.path.basename(ruta))
 
-                    # ==========================================
-                    # REGISTRO EN SUPABASE (ENCABEZADO + LINEAS)
-                    # ==========================================
-                    if supabase:
-                        try:
-                            # 1. Insertar Factura (Encabezado)
-                            factura_payload = {
-                                "numero_factura": res['factura'],
-                                "fecha": fecha_sel.isoformat(),
-                                "emisor": nombre_emisor,
-                                "cliente": nombre_cliente,
-                                "total_sin_iva": total_acumulado,
-                                "total_con_iva": total_con_iva,
-                                "archivo_ods": os.path.basename(ruta)
-                            }
-                            
-                            res_fac = supabase.table("facturas_encabezado").insert(factura_payload).execute()
-                            
-                            if res_fac.data:
-                                factura_id = res_fac.data[0]["id"]
-                                
-                                # 2. Preparar e Insertar Detalles de Líneas
-                                lineas_payload = []
-                                for prenda_nombre, desgloses in pedido_limpio.items():
-                                    for talla, cantidad in desgloses.items():
-                                        lineas_payload.append({
-                                            "factura_id": factura_id,
-                                            "prenda": prenda_nombre,
-                                            "talla": talla,
-                                            "cantidad": cantidad
-                                        })
-                                
-                                if lineas_payload:
-                                    supabase.table("facturas_lineas").insert(lineas_payload).execute()
-                                
-                                st.info("Factura y líneas guardadas en Supabase.")
-                        except Exception as sp_err:
-                            st.warning(f"Error al sincronizar con Supabase: {sp_err}")
-
-                    # Registrar la factura en Excel / Historial local
+                # ========================================================
+                # REGISTRO EN SUPABASE (ENCABEZADO + LINEAS + CONTADORES)
+                # ========================================================
+                if supabase:
                     try:
-                        from src.utils import registrar_factura
-                        registrar_factura(
-                            n_factura=res['factura'],
-                            fecha=fecha_str,
-                            emisor=nombre_emisor,
-                            cliente=nombre_cliente,
-                            total_sin_iva=total_acumulado,
-                            total_con_iva=total_con_iva,
-                            ruta_archivo=os.path.basename(ruta)
-                        )
-                    except Exception as reg_err:
-                        st.warning(f"⚠️ No se pudo registrar la factura localmente: {reg_err}")
-                    
-                    # Actualizar JSON local de contadores
-                    contadores[emisor_key]['ultimo_numero'] = res['factura']
-                    with open(PATH_COUNTERS, 'w', encoding='utf-8') as f:
-                        json.dump(contadores, f, indent=2, ensure_ascii=False)
-                    
-                    st.balloons()
-                except Exception as e:
-                    st.error(f"Error en el motor: {e}")
+                        # 1. Insertar Factura (Encabezado con nombres reales de columnas)
+                        factura_payload = {
+                            "numero_factura": str(res['factura']),
+                            "fecha_emision": fecha_sel.isoformat(),
+                            "user_key": emisor_key,
+                            "id_cliente": cliente,
+                            "base_imponible": total_acumulado,
+                            "total_factura": total_con_iva,
+                            "estado": "Pendiente"
+                        }
+                        
+                        res_fac = supabase.table("facturas_encabezado").insert(factura_payload).execute()
+                        
+                        if res_fac.data:
+                            factura_id = res_fac.data[0]["id"]
+                            
+                            # 2. Insertar Detalles de Líneas
+                            lineas_payload = []
+                            for prenda_nombre, desgloses in pedido_limpio.items():
+                                for talla, cantidad in desgloses.items():
+                                    lineas_payload.append({
+                                        "factura_id": factura_id,
+                                        "prenda": prenda_nombre,
+                                        "talla": talla,
+                                        "cantidad": cantidad
+                                    })
+                            
+                            if lineas_payload:
+                                supabase.table("facturas_lineas").insert(lineas_payload).execute()
+                            
+                            # 3. Incrementar Contador en Supabase
+                            incrementar_contador_factura(emisor_key)
+                            
+                            st.info("✅ Factura, desglose y contador guardados correctamente en Supabase.")
+                    except Exception as sp_err:
+                        st.error(f"Error al sincronizar con Supabase: {sp_err}")
+
+                st.balloons()
+            except Exception as e:
+                st.error(f"Error en el proceso de generación: {e}")

@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from src.db import get_facturas_df, save_facturas_df
+from src.db import get_facturas_df, save_facturas_df, delete_factura_by_id
 
 def render_history_view():
     st.subheader("📊 Historial de Facturas y Cobros")
@@ -19,15 +19,11 @@ def render_history_view():
     # Normalización y compatibilidad de nombres de columnas
     df_historial['Nº Factura'] = df_historial.get('numero_factura', pd.Series(dtype=str)).astype(str)
     
-    # Manejo de la fecha según la columna que venga de Supabase
     if 'fecha_emision' in df_historial.columns and not df_historial['fecha_emision'].isna().all():
         df_historial['Fecha'] = df_historial['fecha_emision']
-    elif 'fecha' in df_historial.columns:
-        df_historial['Fecha'] = df_historial['fecha']
     else:
         df_historial['Fecha'] = str(datetime.now().date())
 
-    # Emisor y Cliente
     df_historial['Emisor'] = df_historial['user_key'] if 'user_key' in df_historial.columns else df_historial.get('emisor', 'N/A')
     
     if 'cliente' in df_historial.columns and not df_historial['cliente'].isna().all():
@@ -35,16 +31,13 @@ def render_history_view():
     else:
         df_historial['Cliente'] = df_historial.get('id_cliente', 'N/A')
 
-    # Importes
     df_historial['Total sin IVA'] = df_historial.get('base_imponible', 0.0).astype(float)
     df_historial['Total con IVA'] = df_historial.get('total_factura', 0.0).astype(float)
     
-    # Estado de Cobro
     if 'estado' not in df_historial.columns:
         df_historial['estado'] = 'Pendiente'
     df_historial['estado'] = df_historial['estado'].fillna('Pendiente')
 
-    # Conversión de fechas a datetime para gráficos y filtros
     try:
         df_historial['Fecha_dt'] = pd.to_datetime(df_historial['Fecha'], format='mixed', errors='coerce')
         df_historial['Fecha_dt'] = df_historial['Fecha_dt'].fillna(pd.Timestamp.now())
@@ -162,26 +155,25 @@ def render_history_view():
 
     st.divider()
 
-    # --- 4. TABLA DETALLADA EDITABLE CON ESTADO ---
+    # --- 4. TABLA DETALLADA EDITABLE CON ESTADO Y ELIMINACIÓN ---
     st.write("### 📋 Registro Detallado")
     
-    columnas_base = ["id", "numero_factura", "fecha_emision", "fecha", "user_key", "cliente", "id_cliente", "base_imponible", "total_factura", "estado"]
+    columnas_base = ["id", "numero_factura", "fecha_emision", "user_key", "id_cliente", "base_imponible", "total_factura", "estado"]
     cols_existentes = [c for c in columnas_base if c in df_mostrar.columns]
     
     df_editor = df_mostrar[cols_existentes].copy()
 
     edited_df = st.data_editor(
         df_editor,
+        hide_index=True,
         use_container_width=True,
-        num_rows="dynamic",
+        num_rows="dynamic", # Permite seleccionar filas y borrarlas con la tecla Delete/Papelera
         key="hv_editor_table_final",
         column_config={
-            "id": st.column_config.NumberColumn("ID", disabled=True),
+            "id": None,
             "numero_factura": "Nº Factura",
             "fecha_emision": "Fecha Emisión",
-            "fecha": "Fecha",
             "user_key": "Emisor",
-            "cliente": "Cliente",
             "id_cliente": "ID Cliente",
             "base_imponible": st.column_config.NumberColumn("Base Imponible (€)", format="%.2f €"),
             "total_factura": st.column_config.NumberColumn("Total (€)", format="%.2f €"),
@@ -198,11 +190,21 @@ def render_history_view():
     with c1:
         if st.button("💾 Guardar Cambios en Supabase", type="primary", use_container_width=True, key="hv_btn_save_final"):
             try:
+                # 1. Detectar si el usuario ha borrado filas de la tabla
+                ids_originales = set(df_editor['id'].dropna().astype(int))
+                ids_editados = set(edited_df['id'].dropna().astype(int))
+                ids_borrados = ids_originales - ids_editados
+
+                # 2. Eliminar de Supabase las facturas borradas en pantalla
+                for fid in ids_borrados:
+                    delete_factura_by_id(fid)
+
+                # 3. Guardar las actualizaciones de las filas restantes
                 save_facturas_df(edited_df)
-                st.success("✅ Cambios guardados en Supabase.")
+                st.success("✅ Registro actualizado en Supabase con éxito.")
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al guardar: {e}")
+                st.error(f"Error al guardar los cambios: {e}")
 
     with c2:
         csv = edited_df.to_csv(index=False).encode('utf-8-sig')

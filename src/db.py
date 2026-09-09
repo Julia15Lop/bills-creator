@@ -42,32 +42,41 @@ def save_facturas_df(df: pd.DataFrame):
     df_clean = df.copy().replace({np.nan: None})
     records = df_clean.to_dict(orient="records")
     
-    sanitized_records = []
+    to_update = []
+    to_insert = []
+    
     for row in records:
-        # Eliminar valores nulos explícitos
-        clean_row = {k: v for k, v in row.items() if str(v) != 'nan' and v is None}
+        clean_row = {k: v for k, v in row.items() if str(v) != 'nan' and v is not None}
 
-        # Si el 'id' es nulo o 0, lo borramos para que la DB asigne el siguiente id autoincremental
-        if "id" in clean_row and not clean_row["id"]:
-            del clean_row["id"]
+        # 1. Normalizar campos a los nombres REALES de la base de datos
+        if "fecha" in clean_row:
+            clean_row["fecha_emision"] = clean_row.pop("fecha")
+            
+        if "cliente" in clean_row:
+            clean_row["id_cliente"] = clean_row.pop("cliente")
 
-        # Garantizar que numero_factura no vaya nulo si es una fila nueva
-        if "numero_factura" not in clean_row or not clean_row["numero_factura"]:
-            clean_row["numero_factura"] = clean_row.get("numero_factura") or obtener_siguiente_numero_factura()
-
-        # Unificar fechas y emisores
-        fecha_val = clean_row.get("fecha") or clean_row.get("fecha_emision")
-        if fecha_val:
-            clean_row["fecha"] = str(fecha_val)
-            clean_row["fecha_emision"] = str(fecha_val)
+        # 2. Eliminar columnas calculadas o fakes de la vista que no existen en Supabase
+        for col_fake in ["Fecha", "Emisor", "Cliente", "Total sin IVA", "Total con IVA", "Fecha_dt", "Mes_Año_Str", "Trimestre"]:
+            clean_row.pop(col_fake, None)
 
         clean_row["user_key"] = clean_row.get("user_key") or "arturo"
 
-        if clean_row:
-            sanitized_records.append(clean_row)
+        # 3. Clasificar entre UPDATE e INSERT
+        row_id = clean_row.get("id")
+        if row_id is not None and str(row_id).isdigit() and int(row_id) > 0:
+            clean_row["id"] = int(row_id)
+            to_update.append(clean_row)
+        else:
+            clean_row.pop("id", None)
+            if not clean_row.get("numero_factura"):
+                clean_row["numero_factura"] = obtener_siguiente_numero_factura()
+            to_insert.append(clean_row)
 
-    if sanitized_records:
-        supabase.table("facturas_encabezado").upsert(sanitized_records).execute()        
+    if to_update:
+        supabase.table("facturas_encabezado").upsert(to_update).execute()
+        
+    if to_insert:
+        supabase.table("facturas_encabezado").insert(to_insert).execute()
 
 # --- FUNCIONES DE CATÁLOGO DE PRECIOS ---
 
@@ -101,7 +110,6 @@ def save_precios_df(df: pd.DataFrame):
         clean_row["user_key"] = clean_row.get("user_key") or "arturo"
         
         row_id = clean_row.get("id")
-        # Si tiene un ID numérico válido > 0 se actualiza; si es nuevo (None/0) se inserta sin enviar 'id'
         if row_id is not None and str(row_id).isdigit() and int(row_id) > 0:
             clean_row["id"] = int(row_id)
             to_update.append(clean_row)
@@ -115,19 +123,32 @@ def save_precios_df(df: pd.DataFrame):
     if to_insert:
         supabase.table("catalogo_precios").insert(to_insert).execute()
 
-# --- CONTADOR DE FACTURAS (DESDE SUPABASE) ---
+# --- CONTADOR Y ELIMINACIÓN ---
+
+def delete_precio_by_id(precio_id: int) -> bool:
+    """Elimina un producto del catálogo en Supabase por su ID."""
+    supabase = get_supabase_client()
+    if not supabase or not precio_id:
+        return False
+    try:
+        supabase.table("catalogo_precios").delete().eq("id", precio_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"Error al borrar producto #{precio_id}: {e}")
+        return False
 
 def obtener_siguiente_numero_factura(user_key: str = "arturo") -> str:
     supabase = get_supabase_client()
     if not supabase:
-        return "215"
+        return "1"
     try:
         res = supabase.table("emisor_config").select("ultimo_numero").eq("user_key", user_key).execute()
-        if res.data and res.data[0].get("ultimo_numero") is not None:
-            return str(res.data[0]["ultimo_numero"] + 1)
+        if res.data and len(res.data) > 0 and res.data[0].get("ultimo_numero") is not None:
+            return str(int(res.data[0]["ultimo_numero"]) + 1)
         return "1"
-    except Exception:
-        return "215"
+    except Exception as e:
+        print(f"Error leyendo contador: {e}")
+        return "1"
 
 def incrementar_contador_factura(user_key: str = "arturo"):
     supabase = get_supabase_client()
@@ -135,6 +156,7 @@ def incrementar_contador_factura(user_key: str = "arturo"):
         return
     try:
         siguiente = int(obtener_siguiente_numero_factura(user_key))
+        # Actualizamos 'ultimo_numero' en emisor_config
         supabase.table("emisor_config").update({"ultimo_numero": siguiente}).eq("user_key", user_key).execute()
     except Exception as e:
         st.error(f"Error al actualizar contador: {e}")
@@ -146,7 +168,7 @@ def delete_factura_by_id(factura_id: int) -> bool:
         return False
     
     try:
-        # 1. Borrar líneas secundarias asociadas
+        # 1. Borrar líneas secundarias
         supabase.table("facturas_lineas").delete().eq("factura_id", factura_id).execute()
         # 2. Borrar encabezado principal
         supabase.table("facturas_encabezado").delete().eq("id", factura_id).execute()
